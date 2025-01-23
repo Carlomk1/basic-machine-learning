@@ -76,7 +76,3 @@ root
 
 # Results
 In this project, the basic techniques of Machine Learning were applied for the first time on the basis of theory using a practical example. Aspects relating to the correct procedure using training/optimization/validation steps and the application of more complex models can now take place after learning the basics.
-
-
-<!-- MARKDOWN LINKS & IMAGES -->
-[Geneva-Airport]: https://www.gva.ch/de/Site/Passagers/Vols/Informations/Arrivees
