@@ -6,7 +6,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/Carlomk1/swiss-real-estate-development">
-    <img src="00_Data/logo.jpg" alt="Logo" width="300" height="200">
+    <img src="00_Data/logo.jpg" alt="Logo" width="200" height="300">
   </a>
 </div>
 
@@ -14,7 +14,7 @@
 <div align="center">
 <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&pause=1000&width=435&lines=Basic+Machine+Learning+and+Predictive+Modeling+Technqiues;Analyzing+Movie+Dataset"
 </div>
-
+<br />
 
 <!-- TABLE OF CONTENTS -->
 <li><a href="#about-the-project">About The Project</a></li>
