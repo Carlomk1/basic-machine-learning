@@ -28,7 +28,7 @@
 In this project, the basic methods & techniques of machine learning and predictive modeling are applied with the use of R.
 
 The aim is to apply the theory using a practical example in order to get to know and understand the basic techniques. 
-For the theoretical basics, the literature *An Introduction to Statistical Learning with Applications in R* by G. James, D. Witten, T. Hastie & R. Tibshirani was used.
+For the theoretical basics, the literature **An Introduction to Statistical Learning with Applications in R** by *G. James, D. Witten, T. Hastie & R. Tibshirani* was used.
 Available under this [link](https://doi.org/10.1007/978-1-0716-1418-1).
 
 # Project idea
@@ -75,7 +75,7 @@ root
 
 
 # Results
-In this project, the basic techniques of Machine LEarning were applied for the first time on the basis of theory using a practical example. Aspects relating to the correct procedure using training/optimization/validation steps and the application of more complex models can now take place after learning the basics.
+In this project, the basic techniques of Machine Learning were applied for the first time on the basis of theory using a practical example. Aspects relating to the correct procedure using training/optimization/validation steps and the application of more complex models can now take place after learning the basics.
 
 
 <!-- MARKDOWN LINKS & IMAGES -->
