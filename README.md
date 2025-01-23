@@ -12,7 +12,7 @@
 
 <!-- PROJECT Title -->
 <div>
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&pause=2000&vCenter=true&width=800&height=200&lines=Basic+Machine+Learning+and+Predictive+Modeling+Techniques;Analysis+of+the+Movie+Dataset"
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&&duration=10000pause=2000&vCenter=true&multiline=true&width=800&height=200&lines=Basic+Machine+Learning+and+Predictive+Modeling+Techniques;Analysis+of+the+Movie+Dataset"
 </div>
 <br />
 
