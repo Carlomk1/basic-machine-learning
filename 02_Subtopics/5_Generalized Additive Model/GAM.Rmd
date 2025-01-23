@@ -1,0 +1,430 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: inline
+---
+```{r setup_5, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, results = 'asis')
+```
+
+Our aim is to gain a comprehensive understanding of the financial performance of
+films on the basis of various factors. 
+In this chapter, the investigation is based on a generalized additive model. 
+We begin by examining the relationship between budget and revenue in different film genres, 
+using both linear and non-linear modeling techniques. 
+The number of variables considered that could have a possible influence is then 
+expanded so that a generalized additive model can be created at the end. 
+The model is analyzed for both scenarios, with and without interactions between the selected variables.
+
+```{r library_5, include=FALSE}
+# Step 1: Load all relevant libraries
+
+library(readr) #
+library(mgcv) #
+library(dplyr) #
+library(tidyr) #
+library(MASS) #
+library(ggplot2) #
+library(scales) #
+library(gridExtra)
+library(kableExtra)
+theme_set(theme_bw())
+```
+
+```{r data_imp, include=FALSE}
+# We start by loading libraries and importing our dataset. 
+# We then clean the data and perform transformations: 
+  # extracting the first genre as the main gerne from the genre column
+  # converting the financial variables to millions for better readability.
+
+# Step 2: Import the dataset
+TMBD_Movie_Dataset <- read_csv("../../00_Data/TMBD Movie Dataset.csv")
+
+# Step 3: View the variables in detail & check the import
+head(TMBD_Movie_Dataset)
+
+# Check for missing values in the dataset
+summary(TMBD_Movie_Dataset) # General NA and summary check
+na_count <- colSums(is.na(TMBD_Movie_Dataset))
+#print(na_count) # Print the number of NA values in each column
+```
+
+```{r data_prep, include=FALSE}
+# Attention 1: Several factors for the categorical variable genres
+#print(TMBD_Movie_Dataset$genres)
+
+# Attention 2: Release date is separated with "-" between the values
+#print(TMBD_Movie_Dataset$release_date)
+
+# Step 3: Split the string "genres", focus only on the first/most relevant genre. 
+# Therefore add a new column with the specific genre
+# release_date handling as date and extract release year
+movies <- TMBD_Movie_Dataset %>%
+  mutate(release_year = as.integer(format(as.Date(release_date), "%Y")),
+         First_Genre = sapply(strsplit(as.character(genres), "\\|"), `[`, 1))
+
+# Set extracted Genre as factor
+movies$First_Genre <- as.factor(movies$First_Genre)
+
+# Step 4: set all values in millions in columns revenue, budget, profit
+movies$revenue_adj <- movies$revenue_adj / 10^6
+movies$budget_adj <- movies$budget_adj / 10^6
+movies$profit <- movies$profit / 10^6
+
+# check the dataset
+# head(movies)
+```
+
+### Linear and Non-linear Models for Predicting Movie Revenue
+
+As a first step, we start by fitting linear models for each genre to understand how well budget 
+predicts revenue, evaluating the effectiveness of these models using \(R^2\) values.
+The basic idea is, that the linear regression highlights the differences in 
+predictive power between genres.
+
+In a second step, the models were then adjusted to take into account the relationship 
+between budget and revenue across all genres in order to minimise the influence of the number of observations.
+
+In a third step we extend the analysis to non-linear relationships using
+polynomial regression for quadratic effects, this analysis provides a deeper 
+insight into the impact of budget on revenue with more complex patterns.
+The following analysis carried out (entire section can be seen in the code) can 
+be summarised with the following points:
+
+```{r lm_analysis_5, fig.height = 6, fig.width = 10, fig.cap="R-squared values for linear models by genre", echo=FALSE, include = FALSE}
+# Create an empty list to store all linear models for each genre
+lm_results_1 <- list()
+unique_genres <- unique(movies$First_Genre)
+
+#log() for the predictor and response variable: They are amaounts and could be in a non-linear relationship
+for (genre in unique_genres) {
+  # Iterate with a for-loop over all movies with the same genre
+  genre_data <- filter(movies, First_Genre == genre)
+  
+  # linear modell for the response variable "revenue-adj"  
+  # based on the predictor "budget_adj"
+  # meaning of "adj" = inflation adjustment into 2010 dollar values
+  lm_model <- lm(log(revenue_adj) ~ log(budget_adj), data = genre_data)
+  
+  # Store the results inside an array
+  lm_results_1[[as.character(genre)]] <- list(model = lm_model,
+                                              summary = summary(lm_model))
+}
+
+# print all the r-squared values for each linear model
+r_squared <- sapply(lm_results_1, function(x) x$summary$r.squared)
+# Convert the R-squared values to a data frame for better printing
+r_squared_df <- data.frame(Genre = names(r_squared), R_Squared = r_squared)
+```
+
+```{r plt_lm_5, fig.height=6, fig.width=10, fig.cap="Grapical analysis - linear model", echo=FALSE, include = FALSE}
+# prepare the output for several plots
+par(mfrow = c(3, 6))
+
+# iterate over all models and plot each graph
+for(genre in names(lm_results_1)) {
+  # extract datas for each genre
+  genre_data <- filter(movies, First_Genre == genre)
+  
+  # Plot
+  plot(log(genre_data$budget_adj), log(genre_data$revenue_adj),
+       main = paste(genre),
+       xlab = "Budget", ylab = "Revenue",
+       col = "blue", pch = 19)
+  
+  # add the regression line to the model: assumption for linearity
+  abline(lm_results_1[[genre]]$model, col = "red")
+}
+```
+
+```{r polynomial_model_5, echo = FALSE, include = FALSE }
+# Create an empty list to store all polynomial models for each genre
+poly_results <- list()
+
+for (genre in unique_genres) {
+  # Iterate with a for-loop over all movies with the same genre
+  genre_data <- filter(movies, First_Genre == genre)
+  
+  # Polynomial model for the response variable "revenue_adj"
+  # based on the predictor "budget_adj" with a quadratic term
+  poly_model <- lm(log(revenue_adj) ~ log(budget_adj) + I(budget_adj^2), data = genre_data)
+  
+  #instead of I(...^2) also poly(..., degree = 2) is possible
+  
+  # Store the results inside an array
+  poly_results[[as.character(genre)]] <- list(model = poly_model,
+                                              summary = summary(poly_model))
+}
+
+# Extract the R-squared values for each polynomial model
+r_squared_poly <- sapply(poly_results, function(x) x$summary$r.squared)
+
+# Convert the R-squared values to a data frame for better printing
+r_squared_poly_df <- data.frame(Genre = names(r_squared_poly), R_Squared = r_squared_poly)
+
+```
+
+```{r tbl_values_5, echo = FALSE, include = FALSE }
+# Combine the linear and polynomial R-squared values into one data frame
+combined_r_squared_df <- merge(r_squared_df, r_squared_poly_df, by = "Genre", suffixes = c("_Linear", "_Poly"))
+
+# Print the combined table nicely using knitr::kable
+knitr::kable(combined_r_squared_df, 
+             caption = "$R^2$ values for linear and polynomial models by genre", 
+             col.names = c("Genre", "$R^2$ (Linear)", "$R^2$ (Polynomial)"), 
+             escape = FALSE) %>%
+  kable_styling(position = "center", full_width = FALSE)
+
+
+```
+
+
+```{r graph_non_lm_5, fig.height=6, fig.width=10, fig.cap="Grapical analysis - non-linearity", echo=FALSE, include = FALSE}
+# Create a list to store ggplot2 objects for nonlinear plots
+gg_nonlinear_plots <- list()
+
+# Iterate over all genres and create nonlinear plots
+for(genre in unique_genres) {
+  # Extract data for each genre
+  genre_data <- filter(movies, First_Genre == genre)
+  
+  # Plotting the nonlinear relationship using ggplot2: assumption non-linearity
+  gg_nonlinear_plots[[genre]] <- ggplot(data = genre_data, aes(x = log(budget_adj), y = log(revenue_adj))) +
+    geom_point(color = "blue", size = 3) +
+    geom_smooth(method = "lm", formula = y ~ poly(x, 2), color = "red") +
+    labs(title = paste(genre), x = "Budget (in millions)", y = "Revenue (in millions)") +
+    theme_minimal()
+}
+
+# Create a combined plot for all nonlinear plots
+do.call(gridExtra::grid.arrange, c(gg_nonlinear_plots, ncol = 3))
+```
+
+**Genre-specific Analysis:**
+
+  - The fit is highly dependent on which model (linear or non-linear) is used.
+  - The \(R^2\) values vary significantly across genres, indicating that the budget's 
+  explanatory power on revenue could be genre-dependent.
+  - Some genres, like music and western show an almost perfect fit.
+  - For other genres like horror and Adventure the \(R^2\) values are quite low.
+
+This illustrates the strong effect of the number of observations, so that an 
+overall model is better suited for general statements.
+
+```{r graphical_analysis_5, fig.height=3, fig.width=8, fig.cap="Grapical analysis - linearity vs. non-linearity", echo=FALSE}
+# Fit the linear model
+lm.fit1 <- lm( log(revenue_adj) ~ log(budget_adj), data = movies)
+#summary(lm.fit1)
+
+# Fit the polynomial model
+lm.fit2 <- lm(log(revenue_adj) ~ log(budget_adj) + I(budget_adj^2), data = movies)
+#summary(lm.fit2)
+
+# Plotting both models in one plot using ggplot2
+ggplot(data = movies, aes(x = budget_adj, y = revenue_adj)) +
+  geom_point(color = "black", size = 1) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "red", linewidth = 1, se = FALSE, linetype = "dashed") +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), color = "seagreen", size = 1, se = FALSE, linetype = "solid") +
+  labs(title = "Linear vs. Non-linear Relationship Model between Budget and Revenue", 
+       x = "Budget [mill. USD]", y = "Revenue [mill. USD]") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values = c("Linear Model" = "red", "Polynomial Model" = "seagreen"))
+```
+
+
+**Linear Regression Model:**
+
+  - The linear regression model indicates a positive relationship between the 
+  budget and revenue of movies.
+  - The coefficient for budget_adj is suggesting that for every million-dollar 
+  increase in the budget, the revenue increases by approximately 0.9 million dollars.
+  - Approximately 50% of the variance in revenue is explained by the budget alone and 
+  the residuals exhibit a significant spread, indicating that many factors beyond budget influence movie revenue.
+
+**Polynomial Regression Model (Quadratic Effect):**
+
+  - This model has only a slightly higher \(R^2\) value.
+  - Overall the model indicates that while there is a slight non-linear relationship, 
+  the improvement over the linear model is only marginal.
+
+**Graphical Analysis:**
+
+  - The red dashed line represents the linear regression fit and many data points lie far away from the line.
+  This is an indicator that the model does not capture all of the variability.
+  - The green solid line represents the polynomial regression fit and captures some non-linear patterns, due to the slight bend.
+  - However, the analysis has shown that the improvement is only marginally better than the linear model.
+
+These findings suggest that further investigation of other potential influencing
+factors and more complex modelling is necessary.
+The next step will therefore be to examine the relationship between the running time 
+of films and their revenues to see if there are any non-linear patterns that 
+can be better captured by more flexible models.
+
+
+### Is there an influence of the variable run-time?
+The film duration is selected as a further influencing variable. The reason for 
+selecting this variable is a recent survey[^3] which shows that society prefers 
+films of a certain length, namely 92 minutes. Therefore, the film length should 
+have a significant influence on the revenue and further increase the model quality.
+
+Based on this assumption, the hypothesis is first examined using the t-test to 
+determine whether the film length really has an influence on the revenue and can 
+be included in the model.
+
+1. **Null hypothesis (H0)**: There is no difference in revenue between films with 
+a running time of more than 92 minutes and films with a running time of 92 minutes or less: \( H_0: \mu_1 = \mu_2 \)
+
+```{r t-test_comments, echo = FALSE, include = FALSE}
+# where \( \mu_1 \) is the average revenue of films with a running time of more than 
+# 90 minutes and \( \mu_2 \) is the average revenue of films with a running time of 90 minutes or less.
+```
+
+2. **Alternative hypothesis (H1)**: Films with a running time of more than 90 minutes 
+generate higher revenues than films with a running time of 90 minutes or less: \( H_1: \mu_1 > \mu_2 \)
+
+```{r t-test runtime, echo = FALSE, include = FALSE}
+# Erstellen von zwei Gruppen: mehr als 90 Minuten, 90 Minuten oder weniger
+group1 <- subset(movies, runtime > 92)$revenue_adj
+group2 <- subset(movies, runtime <= 92)$revenue_adj
+
+# Durchführen des t-Tests
+t.test_result <- t.test(group1, group2, alternative = "greater")  # 'greater' for a one sided test
+
+# Print the t-test result as-is
+print(t.test_result)
+```
+Here are the key results and their interpretation:
+
+**t-value**: 5.06 & **p-value:** 3.096e-07
+
+**Mean values of the samples:**
+
+  - Mean value of group 1 (films > 90 minutes): 213
+  - Mean value of group 2 (films < 90 minutes): 129
+
+The t-value is positive and relatively high, so this could indicate a strong difference between the two groups.
+The very small p-value (well below 0.05) means that the probability of observing 
+such an extreme value of the test statistic if the null hypothesis were true is extremely low.
+The mean values of each sample show that the average revenue of films with a running time of more 
+than 90 minutes is around 84 millions higher than that of shorter films.
+
+The results of the test support the alternative hypothesis that films with 
+a running time of more than 92 minutes generate significantly higher revenues than 
+films that last 92 minutes or less. The running time is therefore included in the model. 
+As a next step, we create a multiple linear model with interactions with all variables mentioned above.
+
+### Completion to a multiple linear model
+
+The following differences are recognizable:
+```{r multiple_lm, fig.height=4, fig.width=8, fig.cap="Multiple linear model", include=TRUE}
+# Multiple linear model without interactions and without the genres
+lm.fit_inter_ext_1 <- lm(log(revenue_adj) ~ log(budget_adj) * runtime, data = movies)
+# summary(lm.fit_inter_ext_1)
+
+# Multiple linear model with interactions and genres-specific
+lm.fit_inter_ext_2 <- lm(log(revenue_adj) ~ log(budget_adj) * runtime * First_Genre, 
+                         data = movies)
+# summary(lm.fit_inter_ext_2)
+```
+
+```{r multiple_lm_plt, echo = FALSE, include = FALSE}
+# Diagnostikplots
+par(mfrow = c(1, 2))
+
+plot(predict(lm.fit_inter_ext_1), resid(lm.fit_inter_ext_1))
+abline(h = 0, col = "red")
+
+plot(predict(lm.fit_inter_ext_2), resid(lm.fit_inter_ext_2))
+abline(h = 0, col = "red")
+
+plot(movies$revenue_adj, predict(lm.fit_inter_ext_1))
+abline(0, 1, col = "red")
+
+plot(movies$revenue_adj, predict(lm.fit_inter_ext_2))
+abline(0, 1, col = "red")
+```
+
+  - Without genre-specific interactions, 50% of the variance in revenue is explained 
+  and there are significant interactions between budget and duration, indicating 
+  that these two variables together have an impact on revenue. 
+  This model is simple and straightforward to describe.
+
+  - With genre-specific interactions, the variance of the model is around 57% and 
+  therefore higher than without interactions. There are some significant interactions between budget, 
+  running time and genre, which indicates that these variables together have an influence on revenues.
+  But this is depending on the genre and the model is far more complex.
+
+These observations lead to the basic consideration that a more flexible model that 
+can better capture non-linear relationships might be more appropriate. 
+Therefore, the application of a Generalised Additive Model (GAM) appears to be a 
+logical next step to model the relationships between variables more comprehensively 
+and improve the accuracy of results. 
+
+### GAM - with and without interactions 
+The generalized additive model can be used to explore complex patterns that may 
+not be fully captured by a linear modeling approach. Therefore, budget, genre, 
+runtime and revenue are reflected in the model. The basic idea is to fit a GAM with a qualitative predictor, in this case Genre.
+In a first model the approach is to observe the effect of budget, runtime and 
+genre on revenue independently. Therefore a GAM with individual smooth terms for no interactions is builded.
+ 
+```{r gam_1, fig.height=3, fig.width=8, fig.cap="GAM with Individual Smooth Terms (No Interactions)", echo = FALSE, include=TRUE}
+# GAM with Individual Smooth Terms: no interactions
+gam_model <- gam(log(revenue_adj) ~ First_Genre + s(budget_adj) + s(runtime), 
+                 data = movies, family = gaussian())
+
+par(mfrow = c(1, 2))
+plot(gam_model, se = TRUE, col = "blue")
+#summary(gam_model)
+
+genre_counts <- table(movies$First_Genre)
+#genre_counts
+```
+
+\newpage
+
+For comparison, we extend the model and add another variable, the release year, to maximize the model, using interactions between the individual variables.
+
+```{r gam2, fig.height=3, fig.width=8, fig.cap="GAM with Interaction Terms", echo = FALSE, include=TRUE }
+
+#Notes for this analysis:
+#Nun ein Modell für Interaktionen zwischen Budget und Genre 
+par(mfrow = c(1, 2))
+gam_model_interaktion <- gam(log(revenue_adj) ~ s(budget_adj) + s(runtime) + 
+                               First_Genre + te(budget_adj, First_Genre, 
+                               bs = c("tp", "re")) + te(release_year, 
+                               First_Genre, bs = c("tp", "re")), 
+                             data = movies, family = gaussian(), method = "REML")
+
+plot(gam_model_interaktion)
+#summary(gam_model_interaktion)
+```
+
+
+### Conclusion
+
+The first approach of using a linear and multiple linear model to examine the 
+dependency of the revenue has not proved to be very practicable. The influence of 
+the factors is probably not linear and a model must be used that can reflect complex 
+and non-linear relationships.The first Generalized Additive Model focuses on the individual effects of the budget
+and genre on the adjusted revenue. Several genres show significant differences in 
+revenue. The smooth term for budget is highly significant, indicating a non-linear 
+relationship between budget and revenue. Overall the model explains about 50% of the variance in the revenue data.
+The second model includes interaction terms, allowing it to capture more complex 
+relationships between budget, genre, release year on the adjusted revenue.
+All predictors show significant effects on revenue and the model explains 55% of the variance, 
+which is a improvement.
+
+The GAM models have shown that they are better able to capture the non-linear and 
+interactive effects between different factors influencing movie revenues.
+For the client, the results mean that future modeling efforts should continue 
+to explore nonlinear and interactive effects to improve the accuracy and insight 
+of predictions in the movie industry. By integrating additional variables, the explained 
+variance could be increased to get a more accurate picture of which factors influence the financial success of movies.
+
+
+[^3]: Talkerresearch.com (2024). Research reveals the perfect movie length. accessed on 14.05.2024 via  https://talkerresearch.com/research-reveals-the-perfect-movie-length/
+
+

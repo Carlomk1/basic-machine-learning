@@ -1,0 +1,198 @@
+---
+output:
+  pdf_document: default
+  fig_caption: yes
+  html_document:
+    df_print: paged
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(forcats)
+library(gridExtra)
+
+theme_set(theme_bw())
+```
+
+```{r loading_datasets, include=FALSE}
+data_raw <- read.csv("../../00_Data/TMBD Movie Dataset.csv", header = TRUE)
+summary(data_raw)
+```
+
+
+The TMBD Movie Dataset contains information about `r nrow(data_raw)` different movies 
+that were released between `r min(data_raw$release_year)` and `r max(data_raw$release_year)`. 
+They are categorized in `r ncol(data_raw)` variables allowing an in-depth and representative analysis of the movie industry.
+The data set can be accessed on kaggle and is publicly available[^1] .
+
+## Fundamental insights
+In the following, a further basic analysis of the data set is carried out, which 
+is supported by various visual representations to give the client an initial insight into the data.
+
+```{r num_movies_year, echo=FALSE}
+# Time series plot: number of movies released each year
+num_movies_year <- data_raw %>%
+  group_by(release_year) %>%
+  summarise(num_movies = n())
+
+num_movies_plot <- ggplot(num_movies_year, aes(x = release_year, y = num_movies)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  labs(x = "Release Year", y = "Number of Movies", title = "Number of movies released per year") +
+  scale_x_continuous(breaks = seq(min(num_movies_year$release_year, na.rm = TRUE), max(num_movies_year$release_year, na.rm = TRUE), by = 10))
+
+# key insights
+total_movies <- sum(num_movies_year$num_movies)
+most_movies_year <- num_movies_year %>% filter(num_movies == max(num_movies)) %>% pull(release_year)
+most_movies_count <- max(num_movies_year$num_movies)
+
+# Calculate year-over-year changes
+num_movies_year <- num_movies_year %>%
+  mutate(change = num_movies - lag(num_movies))
+
+# Find the year with the greatest increase
+max_growth_year <- num_movies_year %>%
+  filter(change == max(change, na.rm = TRUE)) %>%
+  pull(release_year)
+
+max_growth_value <- max(num_movies_year$change, na.rm = TRUE)
+```
+
+```{r num_movies_year_plt, fig.height=3, fig.width=8, fig.cap= "Number of movies released", echo=FALSE}
+num_movies_plot
+```
+
+Based on the data, there have been a total of `r total_movies` movies released over the years. 
+The year with the most movie releases was `r most_movies_year` with a total of `r most_movies_count` movies released.
+The year with the greatest increase in the number of movies released was `r max_growth_year`,
+with an increase of `r max_growth_value` movies compared to the previous year.
+
+```{r total_profit_year, echo=FALSE}
+# Total Profit over Time
+total_profit <- data_raw %>% 
+  group_by(release_year) %>% 
+  summarise(total_profit = sum(profit / 10^6, na.rm = TRUE))
+
+plt.1_1 <- ggplot(total_profit, aes(x = release_year, y = total_profit)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  labs(x = "Release Year", y = "Total Profit (in millions)", title = "Total Profit Over Time") +
+  scale_y_continuous(labels = scales::label_number(scale = 1, accuracy = 0.1))
+```
+
+
+```{r movie_profit_year, echo=FALSE}
+# Profit per movie over time
+profit_by_year <- data_raw %>%  
+  group_by(release_year) %>% 
+  summarise(total_profit = sum(profit / 10^6, na.rm = TRUE), num_movies = n()) %>% 
+  mutate(average_profit_per_movie = total_profit / num_movies)
+
+plt.2_1 <- ggplot(profit_by_year, aes(x = release_year, y = average_profit_per_movie)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  labs(x = "Release Year", y = "Average Profit (in millions)", title = "Profit Per Movie Over Time") +
+  scale_y_continuous(labels = scales::label_number(scale = 1, accuracy = 0.1))
+```
+
+```{r movie_profit_plots,fig.height=3, fig.width=8, fig.cap="Profit over time ", echo=FALSE}
+# Arrange the plots side by side
+grid.arrange(plt.1_1, plt.2_1, ncol = 2)
+```
+```{r most_profitable_genre, include=FALSE}
+genre_profit <- data_raw %>%
+  separate_rows(genres, sep = "\\|") %>%
+  group_by(genres) %>%
+  summarise(mean_profit = mean(profit, na.rm = TRUE))
+
+most_profitable_genre <- genre_profit %>%
+  arrange(desc(mean_profit)) %>%
+  slice(1) %>%
+  pull(genres)
+```
+The average profit of the movies in the dataset amounts to $`r sprintf("%.2f", mean(data_raw$profit, na.rm = TRUE) / 1000000)` 
+million, whereas the most profitable genre appears to be `r most_profitable_genre`.
+
+```{r top10_revenue,fig.height=4, fig.width=8, fig.cap="Top performing movies", echo=FALSE}
+# Sort the dataset by earnings in descending order
+data_sorted <- data_raw[order(-data_raw$revenue), ]
+
+# Select the top 10 movies
+top_10_movies <- head(data_sorted, 10)
+
+# Convert revenue to millions
+top_10_movies$revenue_millions <- top_10_movies$revenue / 10^6
+
+# Calculate the range of release years
+min_release_year <- min(top_10_movies$release_year, na.rm = TRUE)
+max_release_year <- max(top_10_movies$release_year, na.rm = TRUE)
+median_release_year <- median(top_10_movies$release_year, na.rm = TRUE)
+
+# Plot the top 10 movies
+top_10_plot <- ggplot(top_10_movies, aes(x = reorder(original_title, revenue_millions), y = revenue_millions)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "", y = "Revenue (in millions)", title = "Top 10 Movies by Revenue") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1, accuracy = 0.1, suffix = "M"))
+
+# Display the plot
+top_10_plot
+
+```
+
+The top 10 movies by revenue were released between the years `r min_release_year` and `r max_release_year`, 
+with a median release year of `r median_release_year`. It is clear to see that newer films generate higher revenues. 
+Possibly higher budget values are available and these could have an influence on the revenue. 
+The following chart also provides an interesting initial insight, showing the distribution of revenues per genre and the number of movies per genre
+
+```{r count_by_genre, echo=FALSE}
+data_clean_genre <- data_raw %>%
+  separate_rows(genres, sep = "\\|")
+
+# Frequency of each genre
+genre_counts <- data_clean_genre %>%
+  count(genres) %>%
+  arrange(n)
+
+# Reordering genres based on frequency
+data_clean_genre$genres <- factor(data_clean_genre$genres, levels = genre_counts$genres)
+
+plot1 <- ggplot(data_clean_genre, aes(x = genres)) + 
+  geom_bar(fill = "skyblue") +
+  labs(title = "Distribution of Movies by Genre", x= "", y ="Number of movies") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r top10_genre_ratings, echo=FALSE}
+# Calculate average revenue for each genre
+genre_revenue <- data_clean_genre %>%
+  group_by(genres) %>%
+  summarise(avg_revenue = mean(revenue / 10^6, na.rm = TRUE)) %>%
+  arrange(desc(avg_revenue))
+
+# Selecting top 10 genres by average revenue
+top_10_genres_revenue <- head(genre_revenue, 10)
+
+# Plotting top 10 genres by average revenue
+plot2 <- ggplot(top_10_genres_revenue, aes(x = reorder(genres, avg_revenue), y = avg_revenue, fill = genres)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "", y = "Average Revenue (in millions)", title = "Top 10 Genres by Average Revenue") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_number(scale = 1, accuracy = 0.1, suffix = "M"))
+
+
+```
+
+```{r genre_plts,fig.height= 3, fig.width=8, fig.cap="genre insights", echo=FALSE}
+# Arrange the plots side by side
+grid.arrange(plot1, plot2, ncol = 2)
+```
+
+It can be seen that the number of films per genre does not directly result in higher revenues.
+For example, most films belong to the drama genre, but in terms of average revenues, 
+the drama genre is not represented in the top 10. Based on the initial basic findings 
+of the project groups and the requirements of the client, the defined hypotheses 
+are examined using suitable models in the following chapters.
+
+[^1]: https://www.kaggle.com/datasets/successikuku/tmbd-movie-dataset/data

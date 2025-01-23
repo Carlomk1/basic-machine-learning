@@ -1,0 +1,208 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r library_6, include=FALSE}
+# Set all the global variables
+echo_var <- FALSE
+fig.align_var <- "center"
+
+```
+
+### Defintion of the model
+
+A neural network in the context of machine learning is a concept derived from the human brain. The idea is to send information via several of these so-called neurons and thereby gain insights. The parameters for an optimal model are calculated during the training process. Using this method, insights can be extracted from complex and, at first glance, unrelated data.[^4]
+
+
+[^4]:[Neural Network](https://en.wikipedia.org/wiki/Neural_network_(machine_learning))
+
+### Hypothesis
+
+The aim of this chapter is to find out whether a neural network can be used to predict the popularity of a film. For this purpose, the budget, the profit and the genres are taken as input. Can we create a model that can reliably predict popularity?
+
+
+```{r  library_6 import, include=FALSE}
+library(nnet)
+library(gamlss.add)
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(tidyverse)
+library(neuralnet)
+library(caret)
+```
+
+```{r  library_6 load_dataset, echo=echo_var, fig.align=fig.align_var}
+d.data_raw_nn <- read.csv("../../00_Data/TMBD Movie Dataset.csv", header = TRUE, stringsAsFactors = TRUE)
+```
+
+```{r library_6 cleaning, echo=echo_var, fig.align=fig.align_var}
+# Divide budget and revenue by one million for plotting
+d.data_raw_nn$budget_millions <- d.data_raw_nn$budget_adj / 10^6
+d.data_raw_nn$revenue_millions <- d.data_raw_nn$revenue_adj / 10^6
+
+# Clean data
+d.data_cleaned_nn <- d.data_raw_nn %>%
+  dplyr::select(budget_millions, revenue_millions, genres, popularity_level) %>%
+  filter(popularity_level != "") %>%
+  filter(!is.na(popularity_level))
+
+# Convert genres column to character type
+d.data_cleaned_nn$genres <- as.character(d.data_cleaned_nn$genres)
+
+# Split the genres column into separate genres
+genres <- strsplit(d.data_cleaned_nn$genres, "\\|")
+
+# Get unique genres
+unique_genres <- unique(unlist(genres))
+
+# Create dummy variables for each genre
+genre_matrix <- sapply(unique_genres, function(genre) {
+  as.numeric(grepl(genre, d.data_cleaned_nn$genres))
+})
+
+# Combine dummy variables with original data
+d.data_cleaned_nn <- cbind(d.data_cleaned_nn, genre_matrix)
+d.data_cleaned_nn <- d.data_cleaned_nn %>%
+  dplyr::select(-genres)
+
+# Remove empty levels from factor levels
+d.data_cleaned_nn$popularity_level <- droplevels(factor(d.data_cleaned_nn$popularity_level))
+
+# Rename the column to match the column name in the training dataset
+names(d.data_cleaned_nn)[names(d.data_cleaned_nn) == "Science Fiction"] <- "ScienceFiction"
+
+# Drop the "Foreign" column from the dataset
+if ("Foreign" %in% colnames(d.data_cleaned_nn)) {
+  d.data_cleaned_nn <- d.data_cleaned_nn %>%
+    dplyr::select(-Foreign)
+}
+
+# Convert popularity_level to numeric and normalize data
+d.data_cleaned_nn$popularity_level <- as.numeric(factor(d.data_cleaned_nn$popularity_level, levels = c("Low", "Medium", "Moderately High", "High"))) - 1
+
+# Normalize function
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Normalize the entire dataset
+d.data_cleaned_nn <- as.data.frame(lapply(d.data_cleaned_nn, normalize))
+```
+
+
+### Build the network
+
+To create the network, the first step is to split the data into a test and a training data set. In this case, we have opted for a split of 80% training and 20% test. This will be used later to test the reliability of our predictions.
+Two hidden layers, each with two account points, were defined as the structure of this model for this first step. This is because it is not too complex, but offers enough possibilities.
+
+```{r library_6 preparation, echo=echo_var, fig.align=fig.align_var}
+# Split data into training and testing sets
+set.seed(23)
+indices <- createDataPartition(d.data_cleaned_nn$popularity_level, p = 0.8, list = FALSE)
+train <- d.data_cleaned_nn[indices, ]
+test <- d.data_cleaned_nn[-indices, ]
+
+# Separate features and labels
+test_in <- test %>% dplyr::select(-popularity_level)
+test_truth <- test %>% pull(popularity_level)
+```
+
+```{r library_6 train, echo=echo_var, fig.align=fig.align_var}
+# Train the neural network model
+set.seed(123)
+genre_net <- neuralnet(popularity_level ~ ., data = train, hidden = c(2, 2), stepmax = 1000000)
+
+```
+
+
+```{r library_6 train plot, echo=echo_var, fig.align=fig.align_var, fig.height=4, fig.cap="Network model"}
+# Plot the neural network model
+plot(genre_net)
+```
+
+
+### Confusion Matrix
+
+Now that the neural network has been created, we can test the model with our test set. We like to use a confusion matrix for this. This matrix makes it very easy to see how often the model was right and how often it was wrong. This is a very good way of determining reliability. If you now look at these results, you can see that the accuracy is only around 50 per cent. This means that only about half of the popularity levels can be predicted correctly. What you can see, however, is that low and high can be predicted better than the middle two levels. Also, the error is usually one level above or below. At least you can estimate the correctness relatively well with the model.
+```{r library_6 testing, echo=echo_var, fig.align=fig.align_var}
+# Make predictions on the test set
+test_results <- neuralnet::compute(genre_net, test_in)
+```
+
+```{r library_6 testtruth, echo=echo_var, fig.align=fig.align_var}
+# Define the thresholds for classification
+thresholds <- c(0, 0.25, 0.5, 0.75, 1.0)
+
+# Convert the continuous predictions into discrete classes
+test_pred <- cut(test_results$net.result, breaks = thresholds, labels = c("Low", "Medium", "Moderately High", "High"), include.lowest = TRUE)
+
+# Ensure correct rounding
+test_truth <- round(test_truth, 6)  # Adjust precision as necessary
+
+# Convert to factor
+test_truth <- factor(test_truth, levels = c(0, 0.333333, 0.666667, 1.0), 
+                      labels = c("Low", "Medium", "Moderately High", "High"))
+```
+
+```{r library_6 matrix, echo=echo_var, fig.align=fig.align_var}
+# Ensure test_pred is a factor with the same levels
+test_pred <- factor(test_pred, levels = c("Low", "Medium", "Moderately High", "High"))
+
+# Generate the confusion matrix
+conf_matrix <- confusionMatrix(test_pred, test_truth)
+# print(conf_matrix)
+```
+
+### Cross validation
+
+This step is about checking the parameters that we have used for the model and thus improving the model once again. The aim here is to find the optimum parameters and thus make the predictions once again. In this way, the accuracy of a model can be improved. In this graphic you can see the different configurations that were tested and you can see that the original network structure was not so far away from the optimum.
+```{r library_6 crossvalid, echo=echo_var, fig.align=fig.align_var, fig.height=4, fig.cap="Cross Validation"}
+
+# Define cross-validation method
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10)
+
+# Train the model using caret
+model <- train(popularity_level ~ ., 
+               data = d.data_cleaned_nn, 
+               method = "nnet", 
+               trControl = train_control, 
+               linout = TRUE,
+               trace = FALSE,
+               tuneGrid = expand.grid(.size = c(2:5), .decay = c(0.1, 0.5, 1, 1.5, 2)))
+
+
+# Plot the model results
+plot(model)
+```
+
+### Conclusion
+
+With the model now optimised by cross-validation, another confusion matrix is created. However, the data basis is now the entire data set on which the predictions are tested. 
+
+You can see in the final model that the accuracy is approximately 46.51%, indicating that the model correctly predicted the popularity level about 46.51% of the time. There is a substantial number of misclassifications, especially between adjacent classes (e.g., "Low" and "Medium", "Medium" and "Moderately High"). This is about the same result, as seen above in the first model. It is possible that there is an imbalance between the different classes and this would also explain the imbalance between the results.
+
+How would you continue here? You could tweak the network structure and parameters again. You could also consider whether the popularity level factors need to be weighted to ensure better results. One should also consider using other libraries as a basis for the calculations, as this might allow a clearer separation of the predictions.
+
+Overall, while the model shows some predictive capability, especially distinguishing the "High" class, it needs improvement to better distinguish between other popularity levels. Further tuning and exploration of data preprocessing techniques should be considered.
+```{r library_6 finalmodel, echo=echo_var, fig.align=fig.align_var}
+# Evaluate the final model on the entire dataset
+final_model <- model$finalModel
+pred <- predict(final_model, newdata = d.data_cleaned_nn)
+
+# Convert predictions to factors
+thresholds <- c(0, 0.25, 0.5, 0.75, 1.0)
+pred_factor <- cut(pred, breaks = thresholds, labels = c("Low", "Medium", "Moderately High", "High"), include.lowest = TRUE)
+
+# Convert truth to factors
+truth <- factor(round(d.data_cleaned_nn$popularity_level, 6), levels = c(0, 0.333333, 0.666667, 1.0), labels = c("Low", "Medium", "Moderately High", "High"))
+
+# Ensure pred_factor is a factor with the same levels
+pred_factor <- factor(pred_factor, levels = c("Low", "Medium", "Moderately High", "High"))
+
+# Generate the confusion matrix
+conf_matrix <- confusionMatrix(pred_factor, truth)
+# print(conf_matrix)
+```

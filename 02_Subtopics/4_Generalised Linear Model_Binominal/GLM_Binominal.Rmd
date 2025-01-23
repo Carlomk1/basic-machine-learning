@@ -1,0 +1,551 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup_4, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, results = 'asis')
+```
+
+### Model description and objective
+
+In this section, we employ the Generalized Linear Model (GLM) with a binomial distribution to help our client to determine the key factors contributing to the financial success of movies. This approach is ideal for addressing binary outcomes, such as whether a movie achieves significant profitability or not.
+We integrate critical predictors like budget, genre or the release timing to understand their impact on a movie's financial performance. Our goal is to equip our client with the ability to predict financial success effectively, optimizing investments and maximizing returns in future projects.
+
+```{r library, include = FALSE}
+# Load necessary packages
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(caret)
+library(pROC)
+library(readr)
+```
+
+```{r import_data, include = FALSE}
+# import the raw data set and get a brief overview of the data
+d.data_raw_rt <- read_csv("../../00_Data/TMBD Movie Dataset.csv")
+summary(d.data_raw_rt)
+str(d.data_raw_rt)
+head(d.data_raw_rt)
+```
+
+```{r prep_data, include = FALSE}
+# create a new variable "main_genre" for each movie
+d.data_raw_rt$main_genre <- sapply(strsplit(as.character(d.data_raw_rt$genres), split = "\\|"), `[`, 1)
+# Convert the categorical variable "main_genre" to a factor to ensure correct modeling
+d.data_raw_rt$main_genre <- as.factor(d.data_raw_rt$main_genre)
+
+# Convert 'release_date' to date format
+d.data_raw_rt$release_date <- as.Date(d.data_raw_rt$release_date)
+# Extract month from 'release_date'
+d.data_raw_rt$release_month <- format(d.data_raw_rt$release_date, "%m")  # months as "01" to "12"
+# Define seasons based on the release month
+d.data_raw_rt$season <- ifelse(as.integer(d.data_raw_rt$release_month) %in% c(6, 7, 8), "Summer",
+                               ifelse(as.integer(d.data_raw_rt$release_month) %in% c(1, 2, 12), "Winter",
+                                      ifelse(as.integer(d.data_raw_rt$release_month) %in% c(9, 10, 11), "Fall",
+                                             "Spring")))
+# Convert 'season' to a factor
+d.data_raw_rt$season <- as.factor(d.data_raw_rt$season)
+```
+
+### Defining the outcome variable for the model
+
+The first step of the analysis is to divide the movies into "profitable" and "not profitable". The calculation shows that almost 80% of the movies achieved a profit. However, from a business perspective, merely covering the costs is usually not considered financial success. For that reason, further analysis is needed to better distinguish between financially successful movies and less successful. Consequently, it is worth to analyze the return on investment (ROI) profitable movies achieved.
+
+```{r prep_outcome, include = FALSE}
+# Calculate adjusted profit
+d.data_raw_rt$profit_adj <- d.data_raw_rt$revenue_adj - d.data_raw_rt$budget_adj
+# Create a logical vector that is TRUE for movies that made a profit
+d.data_raw_rt$is_profitable <- d.data_raw_rt$profit_adj > 0
+# Calculate the percentage of profitable movies
+percentage_profitable <- mean(d.data_raw_rt$is_profitable, na.rm = TRUE) * 100
+# Display the percentage of profitable movies
+cat("Percentage of profitable movies:", percentage_profitable, "%\n")
+```
+
+```{r set_ROI, include = FALSE}
+# Calculate ROI
+d.data_raw_rt$ROI <- d.data_raw_rt$profit_adj / d.data_raw_rt$budget_adj
+# Calculate proportions for different ROI thresholds
+roi_thresholds <- c(1, 1.5, 2)  # 100%, 150%, and 200%
+names <- c("ROI > 100%", "ROI > 150%", "ROI > 200%")
+results <- setNames(lapply(roi_thresholds, function(threshold) {
+  financial_success <- ifelse(d.data_raw_rt$ROI > threshold, 1, 0)
+  prop.table(table(financial_success))
+}), names)
+
+# Print results
+print(results)
+```
+
+```{r barplot_ROI, fig.height=3, fig.width=3, include = TRUE, echo = FALSE}
+par(mar = c(3, 4, 3, 1) + 0.1)
+# Preparing the data for barplot
+barplot_data <- do.call(rbind, results) * 100
+col_names <- c("Below Target ROI", "Above Target ROI")
+bar_colors <- c("red", "blue", "green")  # Color for each threshold
+
+# Barplot with detailed legend for ROI thresholds
+barplot(barplot_data, beside = TRUE, col = bar_colors, 
+        legend.text = TRUE, names.arg = col_names, 
+        args.legend = list(title = "Profit Thresholds", legend = names, fill = bar_colors, x = "top", inset = c(-0.15, -0.15), cex = 0.5),
+        ylab = "Percentage of Movies", 
+        ylim = c(0, 100),
+        cex.axis = 0.6, cex.lab = 0.6, cex.names = 0.6, cex.main = 0.6)
+
+text(x = c(1.5, 4, 6.5), y = -5, labels = names, srt = 45, adj = 1, cex=0.6)
+par(mar = c(5, 4, 4, 2) + 0.1)
+```
+
+The barplot reveals the following:
+
+   - ROI > 100%: 40% of the movies are below, 60% above
+   - ROI > 150%: 49% of the movies are below, 51% above
+   - ROI > 200%: 58% of the movies are below, 42% above
+
+Considering that the focus is on the financial success of movies compared to other movies, ROI of > 100% seems too low, given that 60% of movies achieved it. The ROI > 150% will be taken as a threshold to distinguish between financially successful movies (above target ROI) and movies that are below this ROI. This seems to be a reasonable choice from a business perspective, but also considering statistical robustness.
+A balanced target variable / classes (ca. 50/50%) can prevent the model from developing a bias toward the majority class, which can distort predictive accuracy and the interpretability of model coefficients. A brief check reveals that 634 movies have a ROI < 150% and 653 movies are above, which matches with the results from the barplot.
+
+```{r new_outcome_v, include = FALSE}
+# Define a new binary outcome variable based on the ROI threshold > 150%
+d.data_raw_rt$financial_success <- ifelse(d.data_raw_rt$ROI > 1.5, 1, 0)
+
+# Double check the balance of the new binary variable
+table(d.data_raw_rt$financial_success)
+```
+
+### Selecting Predictors
+
+Considering the given dataset, the following variables might be relevant predictors: Budget, Runtime, Genre and Release Season. This will be inspected in this section.
+
+```{r trans_budget, include = FALSE}
+# Transform budget to millions
+d.data_raw_rt$budget_millions <- d.data_raw_rt$budget_adj / 1e6
+```
+
+```{r hist_budget_runtime, include = FALSE}
+# Histograms for budget and runtime
+hist(d.data_raw_rt$budget_millions, main="Histogram of Budget", xlab="Budget in Mio.$")
+hist(d.data_raw_rt$runtime, main="Histogram of Runtime", xlab="Runtime")
+```
+
+```{r boxplot_budget_genre, include = FALSE}
+# Boxplots for budget and genre
+par(mar=c(6, 4, 4, 2) + 0.1)
+boxplot(d.data_raw_rt$budget_millions ~ d.data_raw_rt$main_genre, 
+        main="Budget by Genre", 
+        ylab="Budget in Mio.", 
+        las=2, 
+        cex.axis=0.8,
+        xlab="")
+
+title(xlab="Genre", line=5)
+```
+
+
+```{r prep_barplot_success_genre, include = FALSE}
+# Calculate the number of financial successes per genre
+success_counts <- tapply(d.data_raw_rt$financial_success, d.data_raw_rt$main_genre, sum)
+# Calculate the total number of movies per genre
+total_counts <- table(d.data_raw_rt$main_genre)
+# Calculate the proportion of successes
+success_proportion <- success_counts / total_counts
+# Order the proportions in descending order
+ordered_indices <- order(success_proportion, decreasing = TRUE)
+ordered_proportions <- success_proportion[ordered_indices]
+```
+
+```{r barplot_success_genre, echo=FALSE, include = FALSE}
+# Barplot of success proportions
+barplot(ordered_proportions,
+        main="Proportion of Financial Success by Genre",
+        ylab="Proportion of Success",
+        xlab="Genre",
+        las=2,       
+        ylim=c(0, 1))
+```
+
+```{r freq_tables_genre_season, include = FALSE}
+# Frequency tables for genre and release season
+table(d.data_raw_rt$main_genre)
+table(d.data_raw_rt$season)
+```
+
+```{r barplots_genre_season, include = FALSE}
+# Bar plots for visual inspection
+barplot(table(d.data_raw_rt$main_genre), main="Distribution of Genres", xlab="Genre", ylab="Count")
+barplot(table(d.data_raw_rt$season), main="Distribution of Releases (Season)", xlab="Season", ylab="Count")
+```
+
+When examining the genre table, there are some genres represented only by a few movies. This needs to be observed when designing initial models and how each genre might influence financial success.
+It might be beneficial to combine sparse genres for model refinement given the unequal representation.
+
+
+```{r trans_budget_runtime, include = FALSE}
+# Data transformation on "budget" and "runtime" needed
+
+# Log transformation necessary for 'Budget' as data is highly skewed as seen in the histogram above
+d.data_raw_rt$log_budget <- log(d.data_raw_rt$budget_millions + 1)
+hist(d.data_raw_rt$log_budget, main="Histogram of Log Transformed Budget", xlab="Log Transformed Budget")
+
+# Standardizing runtime due to different scale compared to budget
+d.data_raw_rt$norm_runtime <- scale(d.data_raw_rt$runtime)
+hist(d.data_raw_rt$norm_runtime, main="Histogram of Normalized Runtime", xlab="Runtime")
+```
+
+
+```{r cor_budget_runtime, include = FALSE}
+# Brief check on correlation between budget and runtime (numerical predictors) for potential collinearity
+cor(d.data_raw_rt[, c("log_budget", "norm_runtime")])
+```
+
+Further, log transformation of budget was necessary due to right-skewness. Runtime was normalized due to different scale compared to budget, needed for further analysis. The correlation of 0.366 between budget and runtime suggests a moderate positive relationship. As the budget increases, the runtime of movies also tends to be longer, but the relationship is not very strong. Given the moderate correlation, both variables can be included in the models for now.
+
+
+### Model Fitting
+
+```{r convert_success_factor, include = FALSE}
+# Convert financial_success to a factor for classification
+d.data_raw_rt$financial_success <- factor(d.data_raw_rt$financial_success, levels = c(0, 1), labels = c("Failure", "Success"))
+```
+
+```{r initial_models, include = TRUE}
+# Model 1 (with main predictors)
+model_1 <- glm(financial_success ~ log_budget + norm_runtime + factor(main_genre) 
+                  + factor(season),
+               family = binomial(link = "logit"), data = d.data_raw_rt)
+# summary(model_1)
+
+# Model 2 (with interaction)
+model_2 <- glm(financial_success ~ log_budget + norm_runtime + factor(main_genre) 
+                  + factor(season) + log_budget:factor(main_genre),
+               family = binomial(link = "logit"), data = d.data_raw_rt)
+# summary(model_2)
+
+# Model 3 (with polynomial terms to capture potential non-linear effects)
+model_3 <- glm(financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 2) 
+                  + factor(main_genre) + factor(season),
+               family = binomial(link = "logit"), data = d.data_raw_rt)
+# summary(model_3)
+```
+
+#### Analysis of Coefficients
+
+**Model 1:**
+The coefficient for log_budget is -0.16354, indicating a slightly negative relationship between budget and the probability of financial success, i.e. ROI > 150%. 
+This suggests that, in isolation, increases in budget at a certain point/ amount could decrease the probability of financial success.
+The variable Runtime is significant with a coefficient of 0.39690, suggesting that longer movies tend to have a higher probability of financial success.
+The genres Adventure, Animation and Horror show a relevant positive effect on financial success. Particularly, movies in the Horror genre have a significantly higher likelihood of being financially successful, as indicated by a coefficient of 0.81461.
+Music genre shows a huge negative coefficient, but with a very large standard error, possibly due to few data points in this category as seen in frequency tables. Also, its p-value (0.96580) is not relevant.
+None of the seasons seem to be influential predictors.
+
+
+**Model 2:**
+The coefficient for log_budget is 0.1407 with a p-value of 0.290689, suggesting that the main effect of budget alone does not significantly impact financial success when not interacting with other factors.
+The coefficient of runtime is 0.4260 and is highly significant, indicating a strong positive relationship between runtime and financial success, similar to Model 1.
+Some genres show significant impact on financial success: Horror, Drama, Comedy and Thriller.
+The interaction terms of Dramas and Horrors are notably significant and negative, indicating that while dramas and horrors tend to be successful, their success is less sensitive to increases in budget compared to other genres.
+A decrease of residual deviance from null deviance suggests that the model explains a significant amount of variability in the data.
+
+
+**Model 3:**
+The coefficient of poly(log_budget, 2)1 is -4.92298 with a p-value of 0.07725, indicating a marginal non-linear effect of budget on financial success. This suggests that the relationship between budget and success is not straightforward and may involve diminishing returns.
+The coefficient poly(log_budget, 2)2 is 10.67026, highly significant (p < 0.00001). This indicates a pronounced non-linear effect, possibly suggesting an optimal budget level.
+The coefficient poly(norm_runtime, 2)1 is 12.48737, also highly significant (p < 0.00001), indicating a strong non-linear positive relationship between runtime and financial success, possibly suggesting an optimal range of runtime for maximizing success.
+The coefficient poly(norm_runtime, 2)2 is 1.01164 with a p-value of 0.67891, suggesting no significant secondary curvature in the relationship between runtime and success.
+Horror continues to show a strong positive effect on financial success (p = 0.00154), consistent with previous models.
+Adventure, Animation, and Romance also demonstrate significant positive impacts on financial success.
+None of the seasons show significant effects on financial success, consistent with findings from previous models.
+
+#### Comparing AIC & BIC
+```{r initial_AIC, echo = FALSE, include = FALSE}
+# Comparing models by AIC
+aic_values <- data.frame(
+  Model = c("Model 1:", "Model 2:", "Model 3:"),
+  AIC = c(AIC(model_1), AIC(model_2), AIC(model_3))
+)
+# Display as a table
+kable(aic_values, col.names = c("Model", "AIC"), caption = "AIC Values for Initial Models")
+```
+
+```{r initial_BIC, echo = FALSE, include = FALSE}
+# Comparing models by BIC
+bic_values <- data.frame(
+  Model = c("Model 1:", "Model 2:", "Model 3:"),
+  BIC = c(BIC(model_1), BIC(model_2), BIC(model_3))
+)
+# Display as a table
+kable(bic_values, col.names = c("Model", "BIC"), caption = "BIC Values for Initial Models")
+```
+```{r combined_AIC_BIC_initial, echo=FALSE, include=TRUE}
+# combined data frame with AIC and BIC values
+aic_bic_values <- data.frame(
+  Model = c("Model 1", "Model 2", "Model 3"),
+  AIC = c(AIC(model_1), AIC(model_2), AIC(model_3)),
+  BIC = c(BIC(model_1), BIC(model_2), BIC(model_3))
+)
+kable(aic_bic_values, col.names = c("Model", "AIC", "BIC"), caption = "AIC and BIC Values for Initial Models")
+```
+
+Model 3 shows the lowest AIC value, suggesting a better fit to the data, likely due to the inclusion of polynomial terms which capture more complexity.
+Moreover, model 3 has also the lowest BIC of the three models, indicating that it is the best model among the three in terms of balancing goodness of fit with complexity.
+This model includes polynomial terms for log_budget and norm_runtime, suggesting that these non-linear transformations capture important patterns in the data more effectively than the linear and interaction terms used in model 1 and 2.
+
+
+#### Cross Validation of models
+
+```{r train_control, include = FALSE}
+set.seed(123)  # for reproducibility
+# Define train control for cross-validation
+train_control <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
+```
+
+```{r cv_initial_models, include = FALSE}
+# Model 1
+cv_model_1 <- train(
+  financial_success ~ log_budget + norm_runtime + factor(main_genre) + factor(season),
+  data = d.data_raw_rt, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"  # Optimize the model based on the ROC metric
+)
+
+# Model 2
+cv_model_2 <- train(
+  financial_success ~ log_budget + norm_runtime + factor(main_genre) + factor(season) + log_budget:factor(main_genre),
+  data = d.data_raw_rt, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# Model 3
+cv_model_3 <- train(
+  financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 2) + factor(main_genre) + factor(season),
+  data = d.data_raw_rt, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+```
+
+```{r print_cv_initial_models, include = FALSE}
+# Print results to check performance
+print(cv_model_1)
+print(cv_model_2)
+print(cv_model_3)
+```
+```{r cv_performance_metrics, echo = FALSE, include = TRUE}
+metrics_1 <- cv_model_1$results[cv_model_1$results$ROC == max(cv_model_1$results$ROC), ]
+metrics_2 <- cv_model_2$results[cv_model_2$results$ROC == max(cv_model_2$results$ROC), ]
+metrics_3 <- cv_model_3$results[cv_model_3$results$ROC == max(cv_model_3$results$ROC), ]
+
+model_metrics <- data.frame(
+  Model = c("Model 1", "Model 2", "Model 3"),
+  ROC = c(metrics_1$ROC, metrics_2$ROC, metrics_3$ROC),
+  Sens = c(metrics_1$Sens, metrics_2$Sens, metrics_3$Sens),
+  Spec = c(metrics_1$Spec, metrics_2$Spec, metrics_3$Spec)
+)
+
+kable(model_metrics, col.names = c("Model", "ROC", "Sensitivity", "Specificity"), caption = "Initial Model Performance Metrics")
+```
+
+### Assessment of the initial models
+
+From the results above, Model 3 has the lowest AIC and a very competitive BIC score, suggesting it's potentially the best fit among the three.
+Furthermore, Model 3 shows the highest ROC value in cross-validation, which suggests it generalizes better than the other models.
+As a conclusion, especially model 3 will be further examined and optimized. However, there are still some insignificant and/or underrepresented predictors in the models that need to be addressed.
+
+
+### Analysis for model refinement
+
+Given the very few movies and/or very low proportion of financial success, some genres will be put in one category.
+The findings underline the importance of genre-specific budgeting strategies. Investing in genres that respond well to budget increases and adjusting strategies for those that do not optimize financial outcomes. Hence, adding an interaction between budget and genres as in model 2 may be helpful.
+The significant polynomial terms for budget and runtime suggest that both factors influence financial success in complex ways. For budget, there may be an optimal level of investment that maximizes financial returns, while for runtime, certain lengths may be more favorable than others.
+Specific genres like Horror, Adventure, Animation, and Romance show a propensity to be more financially successful. This emphasizes the importance of genre choice in film production.
+The lack of significant seasonal impact suggests that the timing of a movie release within the year may not be as critical to its financial outcome as genre, budget and runtime.
+
+
+```{r new_group_genres, include = FALSE}
+# Adjusting genre classification based on new grouping strategy
+d.data_raw_rt <- d.data_raw_rt %>%
+  mutate(main_genre_new = case_when(
+    main_genre %in% c("Mystery", "Crime") ~ "Mystery_Crime",
+    main_genre %in% c("Documentary", "History", "War", "Music", "Western") ~ "Doc_Hist_War_Mus_West",
+    main_genre %in% c("Science Fiction", "Fantasy") ~ "SciFi_Fantasy",
+    TRUE ~ main_genre
+))
+table(d.data_raw_rt$main_genre_new)
+```
+
+### Model Refinement Part 1
+
+```{r refined models, include = TRUE}
+# New model 1 - grouped genres
+new_model_1 <- glm(financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) 
+                   + factor(main_genre_new),
+               family = binomial(link = "logit"), data = d.data_raw_rt)
+#summary(new_model_1)
+
+# New model 2 - only statistically significant genres
+model_2_filtered_data <- subset(d.data_raw_rt, main_genre_new 
+                                %in% c("Adventure", "Animation", "Horror", "Romance"))
+
+new_model_2 <- glm(financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) 
+                   + factor(main_genre_new),
+               family = binomial(link = "logit"), data = model_2_filtered_data)
+#summary(new_model_2)
+```
+
+The first grouping of genres ("Mystery_Crime", "Doc_Hist_War_Mus_West" and "SciFi_Fantasy") does not seem to improve the model. Hence, further grouping might be needed in order to improve the model. However, the new model 2 where only statistically relevant genres are considered, shows a massive improvement in regards to AIC and BIC values.
+
+### Model Refinement Part 2
+```{r further_grouped_genres, include = FALSE}
+# Adjusting genre classification based on further adjusted grouping strategy
+d.data_raw_rt <- d.data_raw_rt %>%
+  mutate(main_genre_new = case_when(
+    main_genre %in% c("Animation", "Family") ~ "Animation_Family",
+    main_genre %in% c("Mystery", "Crime", "Thriller") ~ "Mystery_Crime_Thriller",
+    main_genre %in% c("Romance", "Drama") ~ "Romance_Drama",
+    TRUE ~ main_genre_new
+  ))
+
+table(d.data_raw_rt$main_genre_new)
+```
+
+
+```{r further_refined_models, include = TRUE}
+# New Model 3 - further grouped genres
+new_model_3 <- glm(financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) 
+                   + factor(main_genre_new),
+               family = binomial(link = "logit"), data = d.data_raw_rt)
+# summary(new_model_3)
+
+# New Model 4 - further grouped genres only statistically significant genres
+model_4_filtered_data <- subset(d.data_raw_rt, main_genre_new 
+                                %in% c("Adventure", "Animation_Family", "Horror"))
+
+new_model_4 <- glm(financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) 
+                   + factor(main_genre_new),
+               family = binomial(link = "logit"), data = model_4_filtered_data)
+# summary(new_model_4)
+
+# New Model 5 - include interaction between budget and genre
+new_model_5 <- glm(financial_success ~ poly(log_budget, 2) * factor(main_genre_new) 
+                   + poly(norm_runtime, 1),
+               family = binomial(link = "logit"), data = model_4_filtered_data)
+# summary(new_model_5)
+```
+
+#### Comparing AIC & BIC of the refined models
+```{r refined_AIC, echo = FALSE, include = FALSE}
+aic_new_values <- data.frame(
+  Model = c("New Model 1:", "New Model 2:", "New Model 3:", "New Model 4:", "New Model 5:"),
+  AIC = c(AIC(new_model_1), AIC(new_model_2), AIC(new_model_3), AIC(new_model_4), AIC(new_model_5))
+)
+
+kable(aic_new_values, col.names = c("Model", "AIC"), caption = "AIC Values for Refined Models")
+```
+```{r refined_BIC, echo = FALSE, include = FALSE}
+bic_new_values <- data.frame(
+  Model = c("New Model 1:", "New Model 2:", "New Model 3:", "New Model 4:", "New Model 5:"),
+  BIC = c(BIC(new_model_1), BIC(new_model_2), BIC(new_model_3), BIC(new_model_4), BIC(new_model_5))
+)
+
+kable(bic_new_values, col.names = c("Model", "BIC"), caption = "BIC Values for Refined Models")
+```
+```{r combined_AIC_BIC_new, echo=FALSE, include=TRUE}
+# combined data frame with AIC and BIC values
+aic_bic_values <- data.frame(
+  Model = c("New Model 1", "New Model 2", "New Model 3", "New Model 4", "New Model 5"),
+  AIC = c(AIC(new_model_1), AIC(new_model_2), AIC(new_model_3), AIC(new_model_4), AIC(new_model_5)),
+  BIC = c(BIC(new_model_1), BIC(new_model_2), BIC(new_model_3), BIC(new_model_4), BIC(new_model_5))
+)
+kable(aic_bic_values, col.names = c("Model", "AIC", "BIC"), caption = "AIC and BIC Values for Refined Models")
+```
+
+### Cross Validation of the refined models
+
+```{r cv_refined_models, include = FALSE}
+# New Model 1
+cv_new_model_1 <- train(
+  financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) + factor(main_genre_new),
+  data = d.data_raw_rt, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"  # Optimize the model based on the ROC metric
+)
+
+# New Model 2
+cv_new_model_2 <- train(
+  financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) + factor(main_genre_new),
+  data = model_2_filtered_data, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# New Model 3
+cv_new_model_3 <- train(
+  financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) + factor(main_genre_new),
+  data = d.data_raw_rt, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# New Model 4
+cv_new_model_4 <- train(
+  financial_success ~ poly(log_budget, 2) + poly(norm_runtime, 1) + factor(main_genre_new),
+  data = model_4_filtered_data, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+
+# New Model 5
+cv_new_model_5 <- train(
+  financial_success ~ poly(log_budget, 2) * factor(main_genre_new) + poly(norm_runtime, 1),
+  data = model_4_filtered_data, 
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control,
+  metric = "ROC"
+)
+```
+
+```{r cv_new_performance_metrics, echo = FALSE, include = TRUE}
+new_metrics_1 <- cv_new_model_1$results[cv_new_model_1$results$ROC == max(cv_new_model_1$results$ROC), ]
+new_metrics_2 <- cv_new_model_2$results[cv_new_model_2$results$ROC == max(cv_new_model_2$results$ROC), ]
+new_metrics_3 <- cv_new_model_3$results[cv_new_model_3$results$ROC == max(cv_new_model_3$results$ROC), ]
+new_metrics_4 <- cv_new_model_4$results[cv_new_model_4$results$ROC == max(cv_new_model_4$results$ROC), ]
+new_metrics_5 <- cv_new_model_5$results[cv_new_model_5$results$ROC == max(cv_new_model_5$results$ROC), ]
+
+new_model_metrics <- data.frame(
+  Model = c("New Model 1", "New Model 2", "New Model 3", "New Model 4", "New Model 5"),
+  ROC = c(new_metrics_1$ROC, new_metrics_2$ROC, new_metrics_3$ROC, new_metrics_4$ROC, new_metrics_5$ROC),
+  Sens = c(new_metrics_1$Sens, new_metrics_2$Sens, new_metrics_3$Sens, new_metrics_4$Sens, new_metrics_5$Sens),
+  Spec = c(new_metrics_1$Spec, new_metrics_2$Spec, new_metrics_3$Spec, new_metrics_4$Spec, new_metrics_5$Spec)
+)
+
+kable(new_model_metrics, col.names = c("Model", "ROC", "Sensitivity", "Specificity"), caption = "New Model Performance Metrics")
+```
+
+### Final Conclusion
+
+Based on the evaluation of the refined models, New Model 5 emerges as the overall best fit for predicting the financial success of movies. It shows one of the lowest AIC and BIC values, indicating an optimal balance between model fit and complexity. Additionally, New Model 5 demonstrates strong performance metrics, with a high ROC of 0.6357, suggesting that it can effectively distinguish between movies achieving ROI>150% and those that do not. Its sensitivity of 0.4000 and specificity of 0.7846 further confirm its balanced approach in correctly identifying both successful and unsuccessful movies. While New Model 2 achieves the highest ROC (0.6429) and specificity (0.7974), its slightly higher AIC and BIC values compared to New Model 5 indicate a trade-off in model simplicity. New Model 3, with the highest sensitivity (0.6215), excels in identifying successful movies but lacks the overall balance in AIC, BIC, and ROC.
+
+To sum up, certain genres like Adventure, Animation/Family, and Horror tend to have higher chances of being financially successful. Additionally, there is evidence suggesting an optimal budget level, although this ideal amount appears to vary by genre. Furthermore, a longer movie runtime generally seems to have a positive influence on financial success, but there also appears to be an optimal range for runtime.

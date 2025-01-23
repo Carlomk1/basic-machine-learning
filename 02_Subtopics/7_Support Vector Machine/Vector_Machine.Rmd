@@ -1,0 +1,312 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  chunk_output_type: inline
+---
+
+The financial success of a film is of great importance to the client. 
+This chapter therefore examines whether a film can be classified as financially 
+successful based on certain characteristics. 
+A support vector machine model is used to predict whether a film can make a significant profit. 
+
+To begin, the publicly available data is used to identify when a film is considered 
+successful and how films that have already been released can be classified as successful.
+
+### How to classify if a movie is financial succesful?
+
+```{r setup_7, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, results = 'asis')
+```
+
+```{r library_7, include = FALSE}
+# Load Packages
+library(tidyverse)
+library(e1071)
+library(caret)
+library(readr)
+library(pdp)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(dplyr)
+theme_set(theme_bw())
+
+```
+
+```{r load_data, include = FALSE}
+# Load Data
+movies <- read_csv("../../00_Data/TMBD Movie Dataset.csv", show_col_types = FALSE)
+
+```
+
+```{r preprocess_data, include = FALSE}
+# Preprocess Data: Show all values in millions
+movies$revenue_adj <- movies$revenue_adj / 10^6
+movies$budget_adj <- movies$budget_adj / 10^6
+movies$profit <- movies$profit / 10^6
+```
+
+```{r extract_and_factor, include = FALSE}
+# Extract the first genre
+# Set extracted Genre as factor
+movies <- movies %>%
+  mutate(First_Genre = sapply(strsplit(as.character(genres), "\\|"), `[`, 1))
+
+movies$First_Genre <- as.factor(movies$First_Genre)
+summary(movies$profit)
+```
+
+```{r basic_overview, include = FALSE}
+# Find the indices of the min and max profit values
+min_profit_index <- which.min(movies$profit)
+max_profit_index <- which.max(movies$profit)
+
+# Extract the corresponding movie titles
+min_profit_movie <- movies$original_title[min_profit_index]
+max_profit_movie <- movies$original_title[max_profit_index]
+
+# Display the results
+cat("Movie with minimum profit:", min_profit_movie, "\n")
+cat("Movie with maximum profit:", max_profit_movie, "\n")
+
+num_profitable_movies <- sum(movies$profit > 0, na.rm = TRUE)
+cat("Number of movies with profit higher than 0:", num_profitable_movies, "\n")
+
+total_observations <- nrow(movies)
+```
+
+Looking at the data set and in particular the profit of the individual films, the following can be seen:
+(The use of log() was not used, which leads to a highly right-skewed distribution. Reason: Profit can/must also be negative.)
+
+1. **range:**
+The values range from -413,912 (The warrior's way) to 2544,506 (Avatar) million USD. 
+The mean value is USD 124,241 million and the median is USD 45,243 million.
+
+2. **distribution:**
+The histogram and skewness value indicate a right-skewed distribution of profit.
+as indicated by the long tail on the right side of the histogram. Therefore log() is used for further analysis.
+
+3. **break-Even-Point:**
+The break-even point is reached when the revenue covers the production and marketing costs of a film. Anything above this is considered a profit. If we now assume that the budget values include these cost components, around `r num_profitable_movies` of `r total_observations` have reached the break-even.
+
+```{r bplot_profit_distribution_1, fig.height=4, fig.width=4, fig.cap="Profit distribution ", echo=FALSE}
+boxplot(movies$profit, col = "orange", alpha = 0.5, main = "Profit Distribution",
+       ylab = "Profit (in millions)")
+```
+
+```{r bplot_profit_distribution_2, fig.height=4, fig.width=4, fig.cap="Profit distribution ", echo=FALSE, include = FALSE}
+log_profit <- log(movies$profit + 1) # 1 to avoid log(0), but not used because na-values occur
+boxplot(log_profit, col = "orange", alpha = 0.5, main = "Log-transformed Profit Distribution",
+       ylab = "Log-Profit (log scale)")
+```
+
+\newpage
+
+### Determination of a treshold value
+
+In the opinion of the project group, however, it makes little sense to call a 
+film successful (from a financial perspective) once it has reached break-even. 
+For this reason, the project group assumes that a film is declared financially 
+successful when it has made a profit of at least 25 million.
+
+With this assumption, we will now investigate whether it is possible to predict
+whether a film will be financially successful based on budget and popularity. 
+
+Why these two variables?
+It is important for the client to understand whether a large budget is required
+to produce a successful film. The popularity level is also used, as a certain 
+level of popularity on the market is a prerequisite for generating sufficient profit.
+The popularity level [^5] describes several measures, that have to been taken into account.
+
+The following plot shows the division of the data by profit into two groups based 
+on the variables budget and popularity with the threshold value of USD 25 million.
+
+
+```{r set_threshold, include = FALSE}
+# Define financial success threshold based on profit
+# With normal log() transformation not possible, because profit is the sum of Budget and Revenue
+# original_profit_threshold <- 25 * 10^6  # 25 million # not used
+# profit_threshold <- log(original_profit_threshold + 1) # not used
+profit_threshold <-25
+movies$financial_success <- ifelse(movies$profit > profit_threshold, "Success", "No Success")
+movies$financial_success <- as.factor(movies$financial_success)
+```
+
+```{r ggplot_profit_dsitr, include = FALSE}
+# Histogram of profit
+ggplot(movies, aes(x = profit)) +
+  geom_histogram(binwidth = 5, fill = "blue") +
+  geom_vline(xintercept = profit_threshold, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Profit",
+       x = "Profit (in millions)",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+```{r ggplot_classification, include = FALSE}
+# Bar plot of financial success
+ggplot(movies, aes(x = financial_success)) +
+  geom_bar(fill = "green", alpha = 1) +
+  labs(title = "Classification of Financial Success Based on Profit",
+       x = "Financial Success",
+       y = "Number of Movies") +
+  theme_minimal()
+
+```
+
+```{r dbl_plt, fig.height=6, fig.width=8, fig.cap="Classification", echo = FALSE, include=TRUE}
+# Scatter plots for continuous variables against financial success
+plt_1 <- ggplot(movies, aes(x = profit, y = budget_adj, color = financial_success)) + geom_point(alpha = 1) + labs(title = "Profit vs Budget", x = "Profit [mill.]", y = "Budget [mill.]") + theme_minimal()
+
+plt_2 <- ggplot(movies, aes(x = profit, y = popularity, color = financial_success)) + geom_point(alpha = 1) + labs(title = "Profit vs Popularity", x = "Profit [mill.]", y = "Vote Average") + theme_minimal()
+
+grid.arrange(plt_1, plt_2, ncol = 1)
+```
+
+### Training the Support Vector Machine Model
+
+```{r variables_testing, include = FALSE}
+# Create some easy Variables to access Data
+set.seed(123)
+indices <- createDataPartition(movies$financial_success, p = 0.85, list = FALSE)
+
+train <- movies %>% slice(indices)
+test <- movies %>% slice(-indices)
+
+# Ensure dplyr is used correctly
+train_in <- train %>% dplyr::select(budget_adj, popularity, runtime, vote_average, First_Genre)
+test_in <- test %>% dplyr::select(budget_adj, popularity, runtime, vote_average, First_Genre)
+
+train_target <- train %>% pull(financial_success)
+test_target <- test %>% pull(financial_success)
+```
+
+Based on this, the SVM model was trained using budget, popularity, runtime, vote average 
+and the first genre as features. The plot shows the decision boundary created by the SVM model, 
+classifying areas of financial success and non-success based on budget and popularity.
+
+```{r train_model_1_7, fig.height=4, fig.width=8, include = TRUE}
+set.seed(123)
+svm_model <- svm(financial_success ~ budget_adj + popularity + runtime + vote_average + 
+                   First_Genre, data = train, kernel = "linear", 
+                 scale = TRUE, cost = 10, probability = TRUE)
+
+#summary(svm_model)
+```
+
+```{r plt_model1_7, fig.height=4, fig.width=8, fig.cap="SVM - linear kernel", include = TRUE, echo = FALSE}
+plot(svm_model, train, budget_adj ~ popularity, slice = list(
+  runtime = mean(train$runtime), vote_average = mean(
+    train$vote_average), First_Genre = levels(train$First_Genre)[1]),
+  xlim = c(0, 10), ylim = c(0, 200))
+
+```
+
+The plot shows the linear decision boundary created by the SVM model to separate the classes (financially successful vs. not successful) based on the budget_adj and popularity features.
+The background colors indicate the regions classified as "Successful" (red) and "Not Successful" (yellow).
+Only the relationship between two variables at a time are ploted (due to the two-dimensional visualizations). In this case, the plot is showing how the decision boundary separates movies based on their budget_adj and popularity values. The other variables (runtime, vote_average, and First_Genre) are still used in the model for training and predictions but they are not visualized in this particular 2D plot. The confusion matrix shows the following results for the defined model:
+
+```{r pred_model_7, echo = FALSE, include = TRUE}
+# Make Predictions
+test_pred <- predict(svm_model, test_in)
+
+# Create Confusion Matrix
+conf_matrix <- confusionMatrix(test_pred, test_target)
+
+# Convert confusion matrix to data frame
+conf_matrix_df <- as.data.frame(conf_matrix$table)
+
+# Display the confusion matrix as a table
+kable(conf_matrix_df, caption = "Confusion Matrix")
+
+```
+
+
+```{r matrix_model_7, echo = FALSE, include = FALSE}
+# Evaluate Results
+conf_matrix <- confusionMatrix(test_pred, test_target)
+print(conf_matrix)
+
+```
+
+The accuracy indicates that the model correctly classified around 76% of the movies in the test set.
+The sensitivity around 76% suggests that the model is moderate at identifying movies that are not financially successful and around 74%  of actual successful movies correctly identified by the model.
+  
+### Model improvment
+
+The next step is to change the model so that non-linear relationships between the 
+features are taken into account and therefore use the kernel radial. The intention 
+is to include complexity in the model and achieve better performance. 
+The cost parameter is also adjusted. A higher cost parameter makes the model more 
+sensitive to misclassification and allows it to create more complex decision boundaries. 
+This can lead to better performance on the training data, but can also increase the risk of overfitting.
+
+```{r train_model_2_7, fig.height=4, fig.width=8, include = TRUE}
+# switch to radial kernel & higher costs: more complex model, maybe better results
+set.seed(123)
+svm_model_2 <- svm(financial_success ~ budget_adj + popularity + runtime + vote_average + 
+                     First_Genre, data = train, kernel = "radial", 
+                   scale = TRUE, cost = 100, probability = TRUE)
+#summary(svm_model_2)
+```
+
+
+```{r plt_model_2_7, fig.height=4, fig.width=8, fig.cap="SVM - radial kernel", include = TRUE, echo = FALSE}
+plot(svm_model_2, train, budget_adj ~ popularity, 
+     slice = list(runtime = mean(train$runtime), 
+                  vote_average = mean(train$vote_average), 
+                  First_Genre = levels(train$First_Genre)[1]))
+```
+
+```{r pred_model_2_7, echo = FALSE, include = TRUE}
+# Make Predictions
+test_pred_2 <- predict(svm_model_2, test_in)
+
+# Create Confusion Matrix
+conf_matrix_2 <- confusionMatrix(test_pred_2, test_target)
+
+# Convert confusion matrix to data frame
+conf_matrix_df_2 <- as.data.frame(conf_matrix_2$table)
+
+# Display the confusion matrix as a table
+library(knitr)
+kable(conf_matrix_df_2, caption = "Confusion Matrix")
+```
+
+```{r matrix_model_2_7, echo = FALSE, include = FALSE}
+# Evaluate Results
+conf_matrix <- confusionMatrix(test_pred_2, test_target)
+print(conf_matrix)
+
+```
+
+The radial SVM model with a higher cost parameter achieved a slightly lower accuracy and 
+specificity compared to the linear SVM model. The improvement overall is marginal, suggesting that 
+while the radial kernel captures more complex relationships, the linear model's performance is also quite robust.
+
+\newpage
+
+### Conclusion
+
+Both the linear and radial SVM models show reasonable performance in classifying films based on financial success using specific features (budget, popularity, running time, rating average and genre). The radial SVM model shows a slight improvement in accuracy and specificity (better at identifying successful movies) compared to the linear model, allowing more complex patterns to be captured according to the project group's interpretation. However, the improvement is marginal so it can be said that the linear model also provides robust results with and  it is more reliable in general performace across both classes.
+
+Insights for our client are:
+
+  - The linear SVM model provides a simpler, reliable and more interpretable solution with good performance.
+  
+  - The radial SVM model offers a slight improvement for capturing non-linear relationships, but at the cost of
+  increased complexity.
+  
+  - Both models suggest that budget and popularity are important predictors of a movie's financial success.
+  
+  - Further improvements to the models could be captured by adding more features.
+
+
+[^5]: Stanford.edu. (2016).[General Machine Learning] Predicting Movie Popularities Using
+Their Genomes. accessed on 14.05.2024 via https://cs229.stanford.edu/proj2016/report/NgiawXuNg-PredictingMoviePopularitiesUsingTheirGenomes-report.pdf
+
+
+

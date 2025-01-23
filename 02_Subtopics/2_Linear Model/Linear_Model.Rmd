@@ -1,0 +1,167 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+### Defintion of the model
+
+A linear model is used to analyse the linear relationships between data. This means how a variable behaves when another variable changes. One speaks here of dependent and independent variables. This makes it relatively easy to establish correlations and thus to make predictions.[^2]
+
+[^2]:[Linear model](https://en.wikipedia.org/wiki/Linear_model)
+
+
+### Hypothesis
+
+The aim of this chapter is to find out whether the revenue of the films is in any way linearly related to the budget. The objective is also to find out whether it is possible to make predictions based on the budget of a movie. In addition, the genres and popularity should be visualized and it should be determined whether these also have an influence. How does the budget, the genres and the popularity influence the revenue of a film?
+
+```{r  library_2 import, echo=FALSE, include=FALSE}
+
+# Import the needed libraries
+library(ggplot2)
+library(gridExtra)
+library(tidyverse)
+library(jtools)
+library(knitr)
+library(pander)
+
+
+
+# Set all the global variables
+echo_var <- FALSE
+fig.align_var <- "center"
+
+# Import the dataset in save it into a variable
+d.data_raw <- read.csv("../../00_Data/TMBD Movie Dataset.csv",
+                header = TRUE,
+                stringsAsFactors = TRUE)
+```
+
+### Fitting a linear model
+
+In the first step we try to fit a simple linear model, using just the budget and the revenue. The line has a positive slope, which means that there seems to be a linear relationship between the two values. In the summary it can be seen, that the p-value is significant, so you can deduce a positive influence of the budget on revenue here.
+
+```{r  library_2 fitting lm, echo=echo_var, warning=FALSE, message=FALSE, fig.align=fig.align_var, fig.height=3, fig.cap="Linear Model"}
+
+# Divide budget and revenue by one million for plotting
+d.data_raw$budget_millions <- d.data_raw$budget_adj / 10^6
+d.data_raw$revenue_millions <- d.data_raw$revenue_adj / 10^6
+
+# Fit a linear model
+model <- lm(revenue_millions ~ budget_millions, data = d.data_raw)
+
+
+# Create the ggplot
+ggplot(d.data_raw, aes(x = budget_millions, y = revenue_millions)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(x = "Budget (Millions)", y = "Revenue (Millions)", title = "Budget against Revenue")
+
+# Summarize the model
+#summ(model)
+
+
+```
+
+### Fitting a linear model for each genre
+
+In order to analyse the data in more depth, a separate linear model was calculated for each genre. This allows us to find out whether the genre could have an influence. As you can see from the individual plots, the higher the budget, the greater the positive effect for all genres. Just the western genre shows a negative trend. Only 3 Plots are shown below to demonstrate the effects.
+
+```{r  library_2 lm per genre, echo=echo_var, warning=FALSE, message=FALSE, out.width = "33%"}
+# Convert genres column to character type
+d.data_raw$genres <- as.character(d.data_raw$genres)
+
+# Split the genres column into separate genres
+genres <- strsplit(d.data_raw$genres, "\\|")
+
+# Get unique genres
+unique_genres <- unique(unlist(genres))
+
+# Create dummy variables for each genre
+genre_matrix <- sapply(unique_genres, function(genre) {
+  as.numeric(grepl(genre, d.data_raw$genres))
+})
+
+# Combine dummy variables with original data
+d.data_with_genres <- cbind(d.data_raw, genre_matrix)
+
+# Define the genres of interest
+genres_of_interest <- c("Adventure", "Western", "Comedy")
+
+# Loop over the genres of interest
+for (genre in genres_of_interest) {
+  # Check if the genre is present in the dataset
+  if (genre %in% unique_genres) {
+    # Subset the data for the current genre
+    genre_data <- d.data_with_genres[d.data_with_genres[[genre]] == 1, ]
+    
+    # Fit a linear model for the current genre
+    model <- lm(revenue_millions ~ budget_millions, data = genre_data)
+    
+    # Create a ggplot for the current genre
+    p <- ggplot(genre_data, aes(x = budget_millions, y = revenue_millions)) +
+      geom_point(color = "black") +  # Add points
+      geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Add linear regression line without confidence interval
+      labs(x = "Budget (Millions)", y = "Revenue (Millions)", title = paste("Budget vs Revenue for", genre))
+    
+    # Print the ggplot
+    print(p)
+  }
+}
+
+```
+
+When all genres are analysed separately, a linear relationship can be seen for each model. However, this is slightly different if all genres are included in the same model. There you can see the clear correlation that the budget has on the revenue. The genres do not all have a significant correlation with a p-value of less than 0.05. You can see that adventure, western and comedy are the only genres that are significant. Adventure is even the only one that has a positive influence. The other two have a negative influence.
+
+```{r  library_2 model summary, echo=echo_var, warning=FALSE, message=FALSE}
+# Convert genres column to character type
+d.data_raw$genres <- as.character(d.data_raw$genres)
+
+# Split the genres column into separate genres
+genres <- strsplit(d.data_raw$genres, "\\|")
+
+# Get unique genres
+unique_genres <- unique(unlist(genres))
+
+# Create dummy variables for each genre
+genre_matrix <- sapply(unique_genres, function(genre) {
+  as.numeric(grepl(genre, d.data_raw$genres))
+})
+
+# Combine dummy variables with original data
+d.data_with_genres <- cbind(d.data_raw, genre_matrix)
+
+# Fit a linear model including budget, revenue, and all dummy variables for genres as predictors
+model <- lm(revenue_millions ~ budget_millions + ., data = d.data_with_genres[, c("revenue_millions", "budget_millions", unique_genres)])
+
+# Summarize the model
+summ(model)
+
+```
+\newpage
+
+### Fitting a linear model for seperate popularity levels
+
+For the third part, we try to fit a linear model for each popularity level to find out, if they differ from another. You can see here at all levels that the revenue also increases as the budget rises. However, at the high level, the gradient is steeper than at the other levels. it can therefore be deduced that a very popular film with a high budget should also generate a correspondingly higher revenue.
+
+```{r  library_2 lm popularity, echo=echo_var, fig.align=fig.align_var, warning=FALSE, message=FALSE, fig.height=3, fig.cap="Linear Model on popularity levels"}
+
+# Exclude rows where the popularity level is "none"
+filtered_data <- subset(d.data_raw, popularity_level != "")
+
+# Fit a linear model for each popularity level and plot all in one graph
+ggplot(filtered_data, aes(x = budget_millions, y = revenue_millions, color = as.factor(popularity_level))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Budget (Millions)", y = "Revenue (Millions)", title = "Budget against Revenue by Popularity Level", color = "Popularity Level") +
+  theme_minimal()
+
+# Fit a linear model including budget, revenue, and all dummy variables for genres as predictors
+model <- lm(revenue_millions ~ budget_millions + popularity_level, data = filtered_data)
+
+# Summarize the model
+#summ(model)
+```
+
+### Conclusion
+
+A comparison of the 3 models shows that they can only predict the desired values to a limited extent. The model fit is relatively low for all models and lies between 0.38 and 0.46, which is less than 50%. This means that with caution, these models can be used to make predictions, but you must be aware of the limitations. Nevertheless, a linear relationship can be recognised in all three models. 

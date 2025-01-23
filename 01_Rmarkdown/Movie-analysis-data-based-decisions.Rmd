@@ -1,0 +1,143 @@
+---
+title: "Basic Applied Machine Learning and Predictive Modelling Techniques"
+subtitle: "Exploring Movie Metrics for Data-based Decisions"
+author: "Viktor Huber, Remigiusz Trydulski, Carlo Scherrer"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+  always_allow_html: true
+---
+
+\newpage
+
+# Introduction
+In this report, the project group will investigate publicly available film data to 
+define models that provide a comprehensive insight into the behavior and impact of attributes of films. 
+The client of this study is active in the investment business and is interested in data-based 
+decision-making support so that important key figures on potentially successful and popular films 
+can be identified at the planning stage and its business activities can be adjusted on this basis.
+
+Together with the client, the project group defined key questions (research questions) 
+for the project and then tested models for their usability. The report begins with 
+the identification of the research questions, followed by the basic insights 
+into the data set before addressing and applying models.
+
+In summary, the analysis of the models provided valuable insights for data-based decisions for the client.
+Further and just as important is the knowledge that the results of the individual models are limited with the provided data.
+
+
+# Hypotheses & Research questions
+The client of this study is active in the investment sector of film projects. 
+The commissioned study is intended to provide added value for its business activities 
+in order to better manage its future project decisions by means of data-based decisions.
+Therefore research questions/hypotheses were formulated that address various aspects of the available film data:
+
+**1. How does the budget, the genres and the popularity influence the revenue of a film?**
+
+**2. How do various factors influence the number of votes/ratings a movie receives?**
+
+**3. Which factors contribute a movie achieving a return on investment (ROI) of at least 150%?**
+
+**4. How do various factors influence the financial performance of films?**
+
+**5. Can we create a model that can reliably predict popularity?**
+
+**6. Is it possible to classify films on the basis of certain characteristics to decide whether a movie can achieve financial success?**
+
+
+\newpage
+
+# Analysis
+```{r, child="../02_Subtopics/1_Analysis/Analysis.Rmd"}
+```
+
+\newpage
+
+## Linear Model
+```{r, child="../02_Subtopics/2_Linear Model/Linear_Model.Rmd"}
+```
+
+
+## Generalised Linear Model with family set to Poisson
+```{r, child="../02_Subtopics/3_Generalised Linear Model_Poisson/GLM_Poisson.Rmd"}
+```
+
+
+## Generalised Linear Model with family set to Binomial
+```{r, child="../02_Subtopics/4_Generalised Linear Model_Binominal/GLM_Binominal.Rmd"}
+```
+
+
+## Generalized Additive Model
+```{r, child="../02_Subtopics/5_Generalized Additive Model/GAM.Rmd"}
+```
+
+
+## Neural Network
+```{r, child="../02_Subtopics/6_Neural Network/Neural_Network.Rmd"}
+```
+
+
+## Support Vector Machine
+```{r, child="../02_Subtopics/7_Support Vector Machine/Vector_Machine.Rmd"}
+```
+
+# Generative AI Reflection
+
+Generative AI, especially Chat GPT, was a supportive tool to structure some project ideas and to get best practice advice for coding in general. The tool was also helpful in debugging the code by providing explanations for the error messages and suggesting possible solutions.
+Furthermore, an important benefit of using generative AI was to gain a deeper knowledge and understanding of the different machine learning models. The tools were also helpful in the final review of the programmed R codes in order to optimize and further improve the codes by making them cleaner. This also included specific and consistent formatting of the report and visualizations. The AI-tuned code was tested directly in R to verify that the result met the project team's expectations.
+
+# Conclusion
+
+By creating a linear model, it was found that there is a significant positive linear relationship 
+between budget and revenue. However, this finding is also heavily dependent on the specific movie genre.
+
+To increase the number of votings, and thus overall popularity, factors such as a higher budget, optimal runtime, specific genres, and the choice of director should be considered. Further, it can be concluded that achieving a substantial financial success (ROI>150%) appears to be genre-dependent, and that there is an optimal budget level, which however may vary by genre. Also, even though longer movie runtime seems to influence financial success positively, there appears to exist an optimal range.
+
+In addition, by applying a generalized additive model, it can be said that non-linear
+and interactive effects must be given greater consideration in future analyses in order to predict financial success
+in a meaningful way. If financial success is considered quantitatively with a defined threshold value, 
+a support vector machine is a suitable solution for using the existing variables to classify financially successful and unsuccessful films. 
+In principle, the neural network can be used to make a certain prediction as to whether a film 
+will achieve a certain level of popularity on the market, but here too it is necessary to include 
+further optimization and the use of other libraries in order to be able to use meaningful results.
+
+# Limitations
+
+The analysis of the movie data is limited by the variables available in the public data set. 
+With a larger data set, which would include additional factors and observations, greater insight into dependencies could be achieved. 
+The analysis showed the client which basic models are suitable for which key indicators of movies and 
+how these would need to be extended in the actual application in the real business activities. Consequently, some of the models presented in this report provide a basic orientation, and can support initial decision-making. However, they may overlook specific details and be overly generalistic.
+
+# Recommendations & Next Steps
+
+How to estimate the revenue:
+
+  - With the budget the revenue can be estimated. The planned film genre can also be used as an additional indicator to predict the success of the film.
+  
+  - Gather more data, so the models can even be fitted better.
+
+How to increase the number of votings:
+  
+  - Influential factors appear to be budget, runtime, genre, and director, which should be considered in terms of vote count and further elaborated.
+  
+  - Explore the impact of additional variables, but also of other approaches that capture the apparent complex relationships more effectively. The main aim should be to gain a better explanation for the highest vote counts.
+  
+  - Investigate the impact of specific budget and runtime ranges.
+  
+  - Identify the most influential directors whose movies achieve the highest vote counts.
+
+Which factors lead to a ROI>150% or a threshold value of 25 millions:
+
+  - Focus on the genres Adventure, Animation/Family, and Horror, which appear to have higher chances to achieve the financial target.
+  
+  - Have an adequate budget and rather longer runtime. In this context, in-depth research is recommended to identify optimal budget levels and runtime ranges, both generally and by genre.
+  
+  - Support vector machines are suitable for classifying films into unsuccessful and successful. The client must determine internally which financial threshold is relevant for its business activities
+  
+How to identify the popularity of a film:
+
+  - With the help of a neural network the popularity of a planed film can be estimated based on the genre and the budget. It is important to give enough information into the network, so that it can determine the level of popularity. So it would be advised to expand the current neural network model with more data.
+  

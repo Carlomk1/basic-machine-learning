@@ -1,0 +1,346 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup_3, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, results = 'asis')
+```
+
+### Model description and objective
+
+The Generalized Linear Model (GLM) with a Poisson distribution is an established statistical approach used to analyze count data, where the response variable represents the number of occurrences of a specific event. In this analysis, we utilize the Poisson GLM to assess how various factors, e.g. budget, runtime, release year, influence the number of votes a movie receives. For example, the model can reveal whether higher budgets or specific genres tend to attract more votes, or how the influence of a director might affect voter engagement. Through this analytical framework, we aim to uncover patterns and trends that could support our client's strategic decisions in film production, enhancing the ability to predict and potentially increase viewer engagement.
+
+```{r packages-loading, message=FALSE, include = FALSE}
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(knitr)
+library(DescTools)
+library(readr)
+```
+
+```{r data-import, include = FALSE}
+# Import the raw dataset
+d.data_raw_rt <- read_csv("../../00_Data/TMBD Movie Dataset.csv")
+
+# Initial examination of the dataset
+head(d.data_raw_rt)
+summary(d.data_raw_rt)
+str(d.data_raw_rt)
+```
+
+```{r check-counts, include = FALSE}
+# Checking for Count Variables
+# Define a function to determine if a column is a potential count variable
+is.count.variable <- function(x) {
+  if (is.numeric(x)) {
+    all(x == floor(x)) && all(x >= 0)
+  } else {
+    NA  
+  }
+}
+
+# Apply the function across all columns and display the results
+result <- sapply(d.data_raw_rt, is.count.variable)
+View(as.data.frame(result))
+```
+
+### Potential Count Variables
+
+A first analysis of numeric variables showed that there are six potential count variables. They will be further inspected using histograms to analyze the distribution. The aim is to assess if they are suitable for the poisson model.
+
+```{r histograms, fig.width=10, fig.height=6, echo = FALSE, include = FALSE}
+# Examine "TRUE" columns (i.e. potential count variables) using histograms
+count_col_names <- c("budget", "revenue", "runtime", "vote_count", "release_year")
+par(mfrow=c(2, 3))
+
+# Loop through each count variable and plot a histogram / number of breaks based on data range and quartiles
+for (col in count_col_names) {
+  data_range <- max(d.data_raw_rt[[col]], na.rm = TRUE) - min(d.data_raw_rt[[col]], na.rm = TRUE)
+  iqr <- IQR(d.data_raw_rt[[col]], na.rm = TRUE)
+  num_breaks <- max(10, min(50, data_range / iqr * 5))
+  
+  hist(d.data_raw_rt[[col]], main=paste(col), xlab=col, breaks=num_breaks, col="skyblue")
+}
+par(mfrow = c(1, 1))
+```
+
+The following could be read from the histograms:
+
+- Right skewed distribution for variables budget, revenue and vote count.
+- Left skewed distribution for release year.
+- Rather central distribution for runtime.
+
+Further, a brief variance analysis showed overdispersion in the data as it is commonly found with count data compared to the Poisson model's assumptions. There is significant or quite significant overdispersion for filtered potential count variables: budget, revenue, runtime, and vote count. As expected, release year appears to be a categorical rather than a count variable. Also, log transformation needed to be applied to normalize distributions of right-skewed variables.
+
+```{r overdispersion-analysis, echo = FALSE, include = FALSE}
+# Analyze potential overdispersion
+
+stats_poisson <- sapply(d.data_raw_rt[, count_col_names], function(x) {
+  c(Mean = mean(x, na.rm = TRUE), Variance = var(x, na.rm = TRUE))
+})
+
+print(stats_poisson)
+```
+
+```{r log-transformation, fig.width=10, fig.height=6, echo = FALSE, include = FALSE}
+count_col_names_r_skewed <- c("budget", "revenue", "runtime", "vote_count")
+par(mfrow=c(2, 3))
+for (col in count_col_names_r_skewed) {
+  transformed_col <- log(d.data_raw_rt[[col]] + 1)
+  hist(transformed_col, main=paste("Log-transformed", col), xlab=paste("Log(", col, "+ 1)"), breaks=30, col="skyblue")
+}
+par(mfrow = c(1, 1))
+```
+
+### Conclusion from Count Variable Analysis
+
+It can be concluded that only the variable vote count from the given dataset meets the requirements for a count variable, i.e. can be used as the dependent variable in the poisson model. 
+The other variables, even though numeric and discrete, can not be considered as count variables, and thus do not qualify as variables for the dependent role. However, they might be considered as predictors in further analysis when fitting the Poisson model.
+
+
+### Model Fitting
+
+```{r model-fitting, include = TRUE}
+# Fit a Poisson model with 'vote count' as the dependent variable
+poisson_model_1 <- glm(vote_count ~ budget + as.factor(release_year) + runtime, 
+                       family = poisson(link = "log"), data = d.data_raw_rt)
+# summary(poisson_model_1)
+
+# Fit a Negative Binomial model for comparison
+nb_model_1 <- glm.nb(vote_count ~ budget + as.factor(release_year) + runtime, 
+                     data = d.data_raw_rt)
+# summary(nb_model_1)
+```
+
+All predictors in the poisson model seem to affect the vote count. The significant coefficients for different levels of release year indicate that there have been year-to-year variations in vote counts that are significant.
+
+In the negative binomial model, the variables budget and runtime also seem to have an effect on vote count, as with the poisson model. However, only a few release years seemed to be relevant.
+
+
+```{r model-diagnostics, fig.width=10, fig.height=8, echo = FALSE, include = FALSE}
+# Setting up plotting parameters for diagnostics
+par(mfrow = c(2, 2))
+
+# Diagnostic plots for the Poisson model
+plot(poisson_model_1, which = 1) # Residuals vs Fitted
+plot(poisson_model_1, which = 2) # Normal Q-Q
+plot(poisson_model_1, which = 5) # Cook's distance plot
+
+# Diagnostic plots for the Negative Binomial model
+plot(nb_model_1, which = 1) # Residuals vs Fitted
+plot(nb_model_1, which = 2) # Normal Q-Q
+plot(nb_model_1, which = 5) # Cook's distance plot
+par(mfrow = c(1, 1))
+```
+
+### Residuals vs Fitted
+
+Poisson model: There is a visible pattern where residuals fan out as the predicted values increase. This suggests that the variance of the residuals is not constant (heteroscedasticity). Also, there are a few points with residuals significantly deviating from zero, particularly for higher predicted values. This indicates that factors other than budget, release year, and runtime might play a significant role in influencing vote counts, especially for more popular movies.
+
+Negative binomial model: Eight rather extreme, but correct values of the predictor variables, make it challenging to plot residuals effectively. However, removing these observations from the dataset does not seem necessary due to their minimal proportion. To confirm, a brief test was conducted to assess the impact of excluding these extreme values. The pseudo R-squared value remained unchanged, indicating no impact on the model.
+
+
+### Q-Q Residuals
+
+Poisson model: The residuals largely follow the theoretical line, but with deviations at both tails (lower left and upper right). This indicates some outliers and possible skew in the distribution of residuals. This could also signal that the Poisson assumption of the mean being equal to the variance is violated (as inspected earlier). Additional factors could enhance the accuracy.
+
+Negative binomial model: The points largely follow the reference line, but there are deviations, especially in the upper tail (high vote counts), indicating heavy-tailed residuals. This deviation suggests that there are extreme values among the residuals that are not well modeled by the assumed distribution.
+
+
+### Residuals vs Leverage
+
+Poisson model: Most data points are clustered to the left, suggesting low leverage. There are a few points with higher leverage and a couple with high Cook's distances. These points (movies) may influence the model heavily.
+
+Negative binomial model: The Cook's distance lines suggest thresholds for identifying influential movies and several are close to or exceed these thresholds, particularly the ones identified with labels, indicating they might be influential.
+Generally, the points aren't spread too far across the leverage spectrum, but those with higher Cook's distance are of concern as those movies may disproportionately affect the model.
+
+
+### Model Comparison
+
+```{r AIC_model_comparison, echo = FALSE, include = TRUE}
+# Comparing models by AIC
+compare_aic_values <- data.frame(
+  Model = c("Poisson Model 1:", "Negative Binomial Model 1:"),
+  AIC = c(AIC(poisson_model_1), AIC(nb_model_1))
+)
+
+kable(compare_aic_values, col.names = c("Model", "AIC"), caption = "AIC Values for Initial Models")
+```
+
+The Negative Binomial model has a significantly lower AIC value compared to the Poisson model (19490 vs 821590). This large difference in AIC values suggests that the Negative Binomial model fits the data much better than the Poisson model.
+
+The Poisson model's higher AIC value could indicate that it is not adequately capturing the variability in the data or is too simplistic (underfitting), particularly if there is overdispersion present in the data. The Negative Binomial model, being more flexible with regard to the variance, can handle overdispersion better, which is likely reflected in the lower AIC.
+
+
+```{r output-visualization, fig.width=10, fig.height=5, echo = FALSE, include = FALSE}
+predicted_counts_1 <- predict(poisson_model_1, type = "response")
+predicted_counts_nb <- predict(nb_model_1, type = "response")
+
+# Plotting observed vs predicted counts for both models
+par(mfrow = c(1, 2))
+plot(d.data_raw_rt$vote_count, predicted_counts_1, main = "Observed vs Predicted Counts (Poisson)")
+abline(0, 1, col = "red")  # Line of equality
+
+plot(d.data_raw_rt$vote_count, predicted_counts_nb, main = "Observed vs Predicted Counts (Neg Binomial)")
+abline(0, 1, col = "red")  # Line of equality
+```
+
+### Model Improvement
+
+Given the model diagnostics, adding new predictors and interaction might be beneficial to improve the models. Based on the general topic understanding and the insights gained in the project so far, various models will be developed and compared.
+The variables revenue, director and genres will be added to both models. For practical reasons and to avoid potential issues related to high dimensionality, only the first genre will be considered for movies with multiple genres, strongly assuming it's the movies' main genre. 
+
+```{r first genre, include = FALSE}
+# Copy the original dataset
+d.data_genre_rt <- d.data_raw_rt
+# create a new variable "first_genre"
+d.data_genre_rt$first_genre <- sapply(strsplit(as.character(d.data_raw_rt$genres), split = "\\|"), `[`, 1)
+# Convert the first_genre to a factor for modeling
+d.data_genre_rt$first_genre <- as.factor(d.data_genre_rt$first_genre)
+```
+
+
+### Model Fitting After Refinement
+
+```{r model-fitting poisson new, include = TRUE}
+# Add "revenue" and "Genre" to the model
+poisson_model_2 <- glm(vote_count ~ budget + as.factor(release_year) + runtime + revenue 
+                       + first_genre, 
+                       family = poisson(link = "log"), data = d.data_genre_rt)
+# summary(poisson_model_2)
+
+# Additionally, add interaction between "budget" and "runtime"
+poisson_model_3 <- glm(vote_count ~ budget * runtime + as.factor(release_year) + revenue 
+                       + first_genre, 
+                       family = poisson(link = "log"), data = d.data_genre_rt)
+# summary(poisson_model_3)
+
+# Additionally, add "director"
+poisson_model_4 <- glm(vote_count ~ budget * runtime + as.factor(release_year) + revenue 
+                       + first_genre + director, 
+                       family = poisson(link = "log"), data = d.data_genre_rt)
+# summary(poisson_model_4)
+```
+
+Given the lower residual deviance and AIC in Model 4, it is clear that this model is the most effective among the three at capturing the dynamics of the data. The additional variables and interactions included in model 4 significantly enhance its explanatory power, making it the preferred model for understanding and predicting the factors influencing vote counts in the given dataset:
+
+   - Poisson Model 2 -> Null deviance: 1547234; Residual deviance: 646572; AIC: 656889
+   - Poisson Model 3 -> Null deviance: 1547234; Residual deviance: 609898; AIC: 620218
+   - Poisson Model 4 -> Null deviance: 1547234; Residual deviance: 133577; AIC: 145466
+
+In conclusion, the Poisson Model 4 not only fits the data better than the other models, but also efficiently handles the complexity introduced by additional predictors and the interaction between budget and runtime.
+
+```{r model-fitting neg binomial new, include = TRUE}
+# same approach as for the poisson models 2-4
+nb_model_2 <- glm.nb(vote_count ~ budget + as.factor(release_year) + runtime + revenue 
+                     + first_genre, data = d.data_genre_rt)
+# summary(nb_model_2)
+
+nb_model_3 <- glm.nb(vote_count ~ budget * runtime + as.factor(release_year) + revenue 
+                     + first_genre, data = d.data_genre_rt)
+# summary(nb_model_3)
+
+nb_model_4 <- glm.nb(vote_count ~ budget * runtime + as.factor(release_year) + revenue 
+                     + first_genre + director, data = d.data_genre_rt)
+# summary(nb_model_4)
+```
+The analysis of the negative binomial models suggests a steady enhancement in model performance from model 2 to model 4. Model 4, with the lowest residual deviance and AIC, is clearly the most robust model, suggesting that the variables and interactions introduced in this model are essential in capturing the dynamics influencing the number of vote counts effectively.
+
+   - Negative binomial model 2 -> Null deviance: 3062.1; Residual deviance: 1421.7; AIC: 19160
+   - Negative binomial model 3 -> Null deviance: 3142.2; Residual deviance: 1418.6; AIC: 19123
+   - Negative binomial model 4 -> Null deviance: 13983; Residual deviance: 1305; AIC: 18570
+
+
+### Model Diagnostics After Refinement
+
+```{r model-diagnostics poisson new, fig.width=12, fig.height=5, echo = FALSE, include = TRUE}
+# Diagnostic plots for the new Poisson models
+par(mfrow = c(1, 3), mar = c(4, 4, 2, 1) + 0.1, oma = c(0, 0, 3, 0))
+# plot(poisson_model_2, which = 1) # Residuals vs Fitted
+# plot(poisson_model_2, which = 2) # Normal Q-Q
+# plot(poisson_model_2, which = 5) # Cook's distance plot
+# plot(poisson_model_3, which = 1) # Residuals vs Fitted
+# plot(poisson_model_3, which = 2) # Normal Q-Q
+# plot(poisson_model_3, which = 5) # Cook's distance plot
+plot(poisson_model_4, which = 1, sub.caption = "", main = "") # Residuals vs Fitted
+plot(poisson_model_4, which = 2, sub.caption = "", main = "") # Normal Q-Q
+plot(poisson_model_4, which = 5, sub.caption = "", main = "") # Cook's distance plot
+mtext("Poisson Model 4", outer = TRUE, cex = 1.5, font = 2)
+par(mfrow = c(1, 1))
+```
+
+
+Examining poisson models, the spread of residuals around the fitted line seems to be narrower with Model 4 compared to Models 2 and 3, suggesting better consistency in variance and less apparent overdispersion. Also, Model 4 shows better adherence to the line with fewer deviations, especially in the middle quantiles, but there are still some movies with very high or low vote counts that the model does not predict accurately. With a few high leverage points, there are similar patterns at model 4 as at the previous models. However, the overall influence on the model seems to be limited.
+
+
+```{r model-diagnostics neg binomial new, fig.width=12, fig.height=5, echo = FALSE, include = TRUE}
+# Diagnostic plots for the new Negative Binomial models
+par(mfrow = c(1, 3), mar = c(4, 4, 2, 1) + 0.1, oma = c(0, 0, 3, 0))
+# plot(nb_model_2, which = 1) # Residuals vs Fitted
+# plot(nb_model_2, which = 2) # Normal Q-Q
+# plot(nb_model_2, which = 5) # Cook's distance plot
+# plot(nb_model_3, which = 1, sub.caption = "", main = "") # Residuals vs Fitted
+# plot(nb_model_3, which = 2, sub.caption = "", main = "") # Normal Q-Q
+# plot(nb_model_3, which = 5, sub.caption = "", main = "") # Cook's distance plot
+plot(nb_model_4, which = 1, sub.caption = "", main = "") # Residuals vs Fitted
+plot(nb_model_4, which = 2, sub.caption = "", main = "") # Normal Q-Q
+plot(nb_model_4, which = 5, sub.caption = "", main = "") # Cook's distance plot
+mtext("Negative Binomial Model 4", outer = TRUE, cex = 1.5, font = 2)
+par(mfrow = c(1, 1))
+```
+
+Considering the diagnostic plots for the negative binomial models, Model 4 appears to be the best overall choice. It manages to maintain a reasonable fit across the central range of the data, showing little pattern and uniform spread in the Residuals vs. Fitted plot. Model 4 also handles outliers effectively, as indicated by the Q-Q plot, which shows fewer and less extreme deviations from normality. Furthermore, it controls for influential observations quite well, as seen in the Residuals vs. Leverage plot, where the distribution of residuals is more balanced and less affected by high leverage points than with the other models.
+
+
+### Predictive Power Check After Refinement
+
+```{r predictive-power-check new, include = FALSE}
+# Predictive power check for all models after refinement
+predicted_counts_2 <- predict(poisson_model_2, type = "response")
+predicted_counts_3 <- predict(poisson_model_3, type = "response")
+predicted_counts_4 <- predict(poisson_model_4, type = "response")
+predicted_counts_nb_2 <- predict(nb_model_2, type = "response")
+predicted_counts_nb_3 <- predict(nb_model_3, type = "response")
+predicted_counts_nb_4 <- predict(nb_model_4, type = "response")
+```
+
+```{r output-visualization-new, fig.width=10, fig.height=5, echo=FALSE, include=TRUE}
+par(mfrow = c(1, 2), mar = c(5, 5, 4, 2) + 0.1)
+
+# Plot for Poisson Model 4
+plot(d.data_genre_rt$vote_count, predicted_counts_4, 
+     main = "Observed vs Predicted (Poisson Model 4)", 
+     xlab = "Observed Vote Count", 
+     ylab = "Predicted Vote Count (Poisson)", 
+     pch = 19, col = "black", cex = 0.5)
+abline(0, 1, col = "red")  # Line of equality
+
+# Plot for Negative Binomial Model 4
+plot(d.data_genre_rt$vote_count, predicted_counts_nb_4, 
+     main = "Observed vs Predicted (Neg Binomial Model 4)", 
+     xlab = "Observed Vote Count", 
+     ylab = "Predicted Vote Count (Neg Binomial)", 
+     pch = 19, col = "black", cex = 0.5)
+abline(0, 1, col = "red")  # Line of equality
+
+# Reset graphical parameters
+par(mfrow = c(1, 1))
+```
+
+The plots show that the Poisson model predictions align better with the observed data along the lower range of counts, but appear to underestimate as the vote counts increase. There is increasing spread in the residuals as the observed vote count increases, which indicates that the Poisson model does not adequately handle the variance in the data.
+
+The negative binomial model shows that it better handles the overdispersion present in the data. The spread in residuals is more consistent across different levels of observed vote counts, and it captures higher counts more accurately than the poisson model. Although there is still some underestimation for higher vote counts, the overall fit is improved compared to the poisson model.
+
+### Final Conclusion
+
+The analysis showed that certain factors, such as budget, runtime, genre, and director can influence the number of votings a movie receives. Consequently, considering these factors in movie production seems beneficial to increase the vote counts. Release year of the movie, even though having somewhat an impact on the number of votes in the past, might not be a valuable factor for planning new movies.
+
+After comprehensive diagnostics, the negative binomial Model 4 has emerged as the best model due to its superior handling of overdispersion. This is evidenced by its significantly lower residual deviance and AIC compared to the Poisson model.
+The negative binomial model provides a more accurate fit, especially for higher counts, and better captures the data's variability. Also, it offers a more reliable representation of the underlying relationships in the data. This model is intended to serve as a starting point for initial decision making. It is recommanded to further investigate e.g. if there are optimal ranges for budget and rutime. Also, exploring other approaches, such as GAMs, could help capture more complex relationships in movie industry/ data, and thus further enhance the model performance, especially to better explain higher vote counts.
