@@ -12,7 +12,7 @@
 
 <!-- PROJECT Title -->
 <div>
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&pause=1000&width=435&lines=Basic+Machine+Learning+and+Predictive+Modeling+Technqiues;Analyzing+Movie+Dataset"
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&pause=2000&vCenter=true&width=800&height=200&lines=Basic+Machine+Learning+and+Predictive+Modeling+Techniques;Analysis+of+the+Movie+Dataset"
 </div>
 <br />
 
@@ -28,7 +28,7 @@
 In this project, the basic methods & techniques of machine learning and predictive modeling are applied with the use of R.
 
 The aim is to apply the theory using a practical example in order to get to know and understand the basic techniques. 
-For the theoretical basics, the literature “An Introduction to Statistical Learning with Applications in R” by G. James, D. Witten, T. Hastie & R. Tibshirani was used.
+For the theoretical basics, the literature *An Introduction to Statistical Learning with Applications in R* by G. James, D. Witten, T. Hastie & R. Tibshirani was used.
 Available under this [link](https://doi.org/10.1007/978-1-0716-1418-1).
 
 # Project idea
