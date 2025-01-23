@@ -12,7 +12,7 @@
 
 <!-- PROJECT Title -->
 <div>
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&&duration=10000&pause=2000&vCenter=true&multiline=true&width=800&height=200&lines=Basic+Machine+Learning+and+Predictive+Modeling+Techniques;Analysis+of+the+Movie+Dataset"
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&&duration=10000&pause=2000&vCenter=true&multiline=true&width=800&height=100&lines=Basic+Machine+Learning+and+Predictive+Modeling+Techniques;Analysis+of+the+Movie+Dataset"
 </div>
 <br />
 
@@ -75,7 +75,7 @@ root
 
 
 # Results
-
+In this project, the basic techniques of Machine LEarning were applied for the first time on the basis of theory using a practical example. Aspects relating to the correct procedure using training/optimization/validation steps and the application of more complex models can now take place after learning the basics.
 
 
 <!-- MARKDOWN LINKS & IMAGES -->
